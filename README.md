@@ -4,12 +4,12 @@
 
 ```bash
 # bash
-docker run --rm -it -v "$PWD:/data" mitch-b/renamer oldText newText
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
 ```powershell
 # powerShell
-docker run --rm -it -v "${PWD}:/data" mitch-b/renamer oldText newText
+docker run --rm -it -v "${PWD}:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
 - Replace all `oldText` with `newText` in file/folder names and file contents, recursively.
