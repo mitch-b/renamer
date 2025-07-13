@@ -23,9 +23,9 @@ docker run --rm -it -v "$PWD:/data" -v "/path/to/.renamerignore:/.renamerignore"
 
 ## Ignore Patterns
 
-- **Built-in**: `.git/` and `node_modules/` are automatically ignored
-- **Project-specific**: Create `.renamerignore` in your project directory
-- **Custom**: Mount `.renamerignore` files to `/.renamerignore` in container
+- **Default**: Project includes `.renamerignore` with common patterns (`.git/`, `node_modules/`, etc.)
+- **Project-specific**: Create `.renamerignore` in your project directory (merges with defaults)
+- **Custom**: Mount `.renamerignore` files to `/.renamerignore` in container (overrides defaults)
 
 **Example .renamerignore:**
 ```
@@ -40,7 +40,6 @@ temp
 - `--skip-contents`: Only rename files/folders, skip content replacement
 - `--ignore <pattern>`: Ignore patterns (comma-separated or multiple flags)
 - `--include <pattern>`: Force include patterns (overrides ignores)
-- `--no-defaults`: Disable built-in `.git/` and `node_modules/` protection
 
 ## Requirements
 
