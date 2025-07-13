@@ -1,6 +1,8 @@
 # renamer 🔀
 
-**Quick Start**
+**A portable Docker-based tool for bulk find-and-replace operations on files and directories.**
+
+## Quick Start
 
 ```bash
 # bash
@@ -12,58 +14,87 @@ docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 docker run --rm -it -v "${PWD}:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
-**With ignore patterns:**
+## Docker Usage Examples
 
+**Basic usage:**
 ```bash
-# Using comma-separated patterns (new, less verbose!)
+# Replace all instances of 'oldText' with 'newText' in file/folder names and contents
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
+```
+
+**With ignore patterns:**
+```bash
+# Using comma-separated patterns (recommended for multiple patterns)
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --ignore "dist,build,logs"
 
-# Using multiple flags (still supported)
+# Using multiple flags (alternative syntax)
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --ignore node_modules --ignore dist
 
-# Using .renamerignore file (best for projects with consistent patterns)
-# Create .renamerignore in your project, then run:
+# Skip file content replacement (only rename files/folders)
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --skip-contents
+```
+
+**Using .renamerignore files:**
+```bash
+# Project-specific patterns (create .renamerignore in your project directory)
+echo -e "dist\nbuild\n*.log" > .renamerignore
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 
-# Override defaults to include .git or node_modules
+# Mount custom ignore file (easy - no environment variable needed!)
+docker run --rm -it \
+  -v "$PWD:/data" \
+  -v "/path/to/my-patterns.txt:/.renamerignore" \
+  ghcr.io/mitch-b/renamer oldText newText
+
+# Mount custom ignore file with custom path (advanced)
+docker run --rm -it \
+  -v "$PWD:/data" \
+  -v "/path/to/my-patterns.txt:/custom.txt" \
+  -e RENAMER_IGNORE_FILE=/custom.txt \
+  ghcr.io/mitch-b/renamer oldText newText
+```
+
+**Power user options:**
+```bash
+# Override defaults to include normally protected directories
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --include .git
 
 # Disable all defaults and use only custom patterns
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --no-defaults --ignore temp
 
-# Use custom ignore file from mounted volume (easy - just mount to default path!)
-docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/.renamerignore" ghcr.io/mitch-b/renamer oldText newText
-
-# Or with custom path (advanced)
-docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/custom.txt" -e RENAMER_IGNORE_FILE=/custom.txt ghcr.io/mitch-b/renamer oldText newText
+# Combine multiple options
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --skip-contents --ignore "temp,cache" --include .git
 ```
 
-- Replace all `oldText` with `newText` in file/folder names and file contents, recursively.
-- `-v "$PWD:/data"` mounts your current directory to `/data` in the container.
-- `.git/` and `node_modules/` directories are automatically ignored to protect version control and dependencies.
-- Support for flexible `.renamerignore` files for project-specific patterns and custom mounted ignore files.
-- Override capabilities for power users who need to edit typically protected directories.
+**What it does:**
+- Replaces all `oldText` with `newText` in file/folder names and file contents, recursively
+- `-v "$PWD:/data"` mounts your current directory to `/data` in the container  
+- `.git/` and `node_modules/` directories are automatically ignored to protect version control and dependencies
+- Supports flexible `.renamerignore` files for project-specific patterns and custom mounted ignore files
+- Provides override capabilities for power users who need to edit typically protected directories
 
 ---
 
 ## Requirements
-- Container runtime installed
+- Docker or compatible container runtime
 
 ---
 
 ## Features
-- **Recursively renames** files and folders matching a search string
-- **Replaces text** inside all files
-- **Smart ignore patterns**: Automatically ignores `.git/` and `node_modules/` directories, supports `.renamerignore` files, and custom ignore patterns
-- **Preview**: Shows sample matches before making changes
-- **Interactive**: Asks for confirmation before proceeding
+- **🐳 Docker-based portability**: Runs consistently across all platforms with container runtime
+- **🔁 Recursively renames** files and folders matching a search string
+- **📝 Replaces text** inside all files
+- **🛡️ Smart ignore patterns**: Automatically ignores `.git/` and `node_modules/` directories, supports `.renamerignore` files, and custom ignore patterns
+- **👀 Preview**: Shows sample matches before making changes
+- **✋ Interactive**: Asks for confirmation before proceeding
+- **🔧 Flexible configuration**: Easy volume mounting for ignore patterns and custom settings
 
 ---
 
 ## Command Line Options
 
 ```bash
-rename-find-replace.sh <find> <replace> [options...]
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer <find> <replace> [options...]
 ```
 
 **Options:**
@@ -78,75 +109,56 @@ rename-find-replace.sh <find> <replace> [options...]
 **Ignore pattern sources (applied in order):**
 1. **Built-in defaults**: `.git/`, `node_modules/` (unless `--no-defaults`)
 2. **`.renamerignore` files**:
-   - `./renamerignore` (current directory/project-specific)
-   - `$RENAMER_IGNORE_FILE` (defaults to `/.renamerignore`, adjustable)
+   - `./renamerignore` (current directory/project-specific, mounted via `-v "$PWD:/data"`)
+   - `$RENAMER_IGNORE_FILE` (defaults to `/.renamerignore`, customizable via environment variable)
 3. **`--ignore` flags**: Command-line additional patterns
 4. **`--include` flags**: Override any ignores for specific patterns
 
-**Examples:**
+## Docker Usage Patterns
+
+### Project-Specific Ignore Patterns
+Create a `.renamerignore` file in your project directory:
 ```bash
-# Basic usage (uses built-in defaults)
-./rename-find-replace.sh oldText newText
+# Create patterns file in your project
+echo -e "dist\nbuild\n*.log\ntemp" > .renamerignore
 
-# Skip file content replacement
-./rename-find-replace.sh oldText newText --skip-contents
-
-# Add patterns via comma-separated list (less verbose!)
-./rename-find-replace.sh oldText newText --ignore "dist,build,logs"
-
-# Add patterns via multiple flags (still supported)
-./rename-find-replace.sh oldText newText --ignore node_modules --ignore dist
-
-# Include .git directory (override default)
-./rename-find-replace.sh oldText newText --include .git
-
-# Disable all defaults and only ignore specific patterns
-./rename-find-replace.sh oldText newText --no-defaults --ignore node_modules
-
-# Use custom global ignore file (simple mounting - no env var needed!)
-RENAMER_IGNORE_FILE=/path/to/my-patterns ./rename-find-replace.sh oldText newText
-
-# Or if file is already at default location:
-# (if /.renamerignore exists, it's automatically used)
-./rename-find-replace.sh oldText newText
-
-# Combine options
-./rename-find-replace.sh oldText newText --skip-contents --ignore "temp,cache"
-```
-
-## Docker Usage with Ignore Files
-
-**Project-specific (.renamerignore in current directory):**
-```bash
-# Create .renamerignore in your project root
-echo "dist" >> .renamerignore
-echo "build" >> .renamerignore
-echo "*.log" >> .renamerignore
-
-# Mount your project directory (includes .renamerignore automatically)
+# Run with your project mounted (automatically includes .renamerignore)
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
-**Custom mounted ignore file (easy - just mount to default path!):**
+### Custom Global Ignore Patterns (Simple)
+Mount your patterns file to the default location:
 ```bash
-# Create patterns file on your host
-echo "custom_temp" > /path/to/my-global-patterns.txt
-echo "build" >> /path/to/my-global-patterns.txt
+# Create global patterns file
+echo -e "dist\nbuild\ncache\n*.tmp" > /path/to/global-patterns.txt
 
-# Mount the file to the default path - no environment variable needed!
+# Mount to default path - no environment variable needed!
 docker run --rm -it \
   -v "$PWD:/data" \
-  -v "/path/to/my-global-patterns.txt:/.renamerignore" \
+  -v "/path/to/global-patterns.txt:/.renamerignore" \
   ghcr.io/mitch-b/renamer oldText newText
 ```
 
-**Custom mounted ignore file (advanced - custom path):**
+### Custom Global Ignore Patterns (Advanced)
+Mount your patterns file to a custom location:
 ```bash
-# Mount to a custom path and specify via environment variable
+# Mount to custom path with environment variable
 docker run --rm -it \
   -v "$PWD:/data" \
-  -v "/path/to/my-global-patterns.txt:/custom-ignore.txt" \
+  -v "/path/to/global-patterns.txt:/custom-ignore.txt" \
   -e RENAMER_IGNORE_FILE=/custom-ignore.txt \
+  ghcr.io/mitch-b/renamer oldText newText
+```
+
+### Combining Patterns
+Use multiple pattern sources together:
+```bash
+# Project .renamerignore + mounted global patterns + command-line patterns
+docker run --rm -it \
+  -v "$PWD:/data" \
+  -v "$HOME/.config/renamer-patterns.txt:/.renamerignore" \
+  ghcr.io/mitch-b/renamer oldText newText --ignore "temp,cache"
+```
   ghcr.io/mitch-b/renamer oldText newText
 ```
 
@@ -162,26 +174,6 @@ docker run --rm -it \
 
 **Using .renamerignore files (Local Development):**
 
-*Project-specific (.renamerignore in current directory):*
-```bash
-# Create .renamerignore in your project root
-echo "dist" >> .renamerignore
-echo "build" >> .renamerignore
-echo "*.log" >> .renamerignore
-
-# Then run without --ignore flags
-./rename-find-replace.sh oldText newText
-```
-
-*Custom location (via environment variable):*
-```bash
-# Create patterns file anywhere
-echo "custom_temp" > /path/to/my-patterns
-
-# Use it via environment variable  
-RENAMER_IGNORE_FILE=/path/to/my-patterns ./rename-find-replace.sh oldText newText
-```
-
 See `.renamerignore.example` for a comprehensive example file.
 
 ---
@@ -193,20 +185,25 @@ See `.renamerignore.example` for a comprehensive example file.
 
 ---
 
-## Build Docker Image (optional)
+## Build Docker Image (Optional)
+
+Most users can use the pre-built image `ghcr.io/mitch-b/renamer`. Only build your own if you need custom modifications:
 
 ```bash
- docker build -t mitch-b/renamer .
+docker build -t mitch-b/renamer .
 ```
 
 ---
 
 ## Warnings & Tips
-- **Backup your data!** This script makes bulk changes.
-- **Test on a copy** before running on important data.
-- **Case-sensitive**: The search is case-sensitive.
-- **No undo**: Changes are immediate and cannot be undone automatically.
-- **Special characters**: If your search/replace strings contain special characters, test carefully.
+- **🐳 Use Docker**: This tool is designed to run in Docker for portability and isolation
+- **💾 Backup your data!** This script makes bulk changes
+- **🧪 Test on a copy** before running on important data  
+- **📁 Mount correctly**: Always use `-v "$PWD:/data"` to mount your current directory
+- **🔍 Case-sensitive**: The search is case-sensitive
+- **⏪ No undo**: Changes are immediate and cannot be undone automatically
+- **⚡ Special characters**: If your search/replace strings contain special characters, test carefully
+- **🛡️ Protected by default**: `.git/` and `node_modules/` are automatically ignored for safety
 
 ---
 
