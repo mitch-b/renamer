@@ -1,63 +1,51 @@
 # renamer 🔀
 
-**Quick Start**
+**Docker-based find-and-replace tool for files and directories.**
+
+## Quick Start
 
 ```bash
-# bash
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
-```powershell
-# powerShell
-docker run --rm -it -v "${PWD}:/data" ghcr.io/mitch-b/renamer oldText newText
-```
-
-- Replace all `oldText` with `newText` in file/folder names and file contents, recursively.
-- `-v "$PWD:/data"` mounts your current directory to `/data` in the container.
-
----
-
-## Requirements
-- Container runtime installed
-
----
-
-## Features
-- **Recursively renames** files and folders matching a search string
-- **Replaces text** inside all files
-- **Preview**: Shows sample matches before making changes
-- **Interactive**: Asks for confirmation before proceeding
-
----
-
-## How it Works
-1. **Preview**: Shows up to 5 sample matches for files, folders, and file contents
-2. **Confirm**: Prompts before making changes
-3. **Replace**: Updates file contents, then renames folders and files
-
----
-
-## Build Docker Image (optional)
+## Basic Options
 
 ```bash
- docker build -t mitch-b/renamer .
+# Skip file contents (only rename files/folders)
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --skip-contents
+
+# Ignore additional patterns
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --ignore "dist,build"
+
+# Mount custom ignore patterns
+docker run --rm -it -v "$PWD:/data" -v "/path/to/.renamerignore:/.renamerignore" ghcr.io/mitch-b/renamer oldText newText
 ```
 
----
+## Ignore Patterns
 
-## Warnings & Tips
-- **Backup your data!** This script makes bulk changes.
-- **Test on a copy** before running on important data.
-- **Case-sensitive**: The search is case-sensitive.
-- **No undo**: Changes are immediate and cannot be undone automatically.
-- **Special characters**: If your search/replace strings contain special characters, test carefully.
+- **Built-in**: `.git/` and `node_modules/` are automatically ignored
+- **Project-specific**: Create `.renamerignore` in your project directory
+- **Custom**: Mount `.renamerignore` files to `/.renamerignore` in container
 
----
+**Example .renamerignore:**
+```
+dist
+build
+*.log
+temp
+```
+
+## Options
+
+- `--skip-contents`: Only rename files/folders, skip content replacement
+- `--ignore <pattern>`: Ignore patterns (comma-separated or multiple flags)
+- `--include <pattern>`: Force include patterns (overrides ignores)
+- `--no-defaults`: Disable built-in `.git/` and `node_modules/` protection
+
+## Requirements
+
+- Docker
 
 ## License
+
 MIT
-
----
-
-## Issues / Feedback
-Open an issue or PR on GitHub if you have suggestions or problems.
