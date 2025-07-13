@@ -12,8 +12,16 @@ docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 docker run --rm -it -v "${PWD}:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
+**With ignore patterns:**
+
+```bash
+# Ignore node_modules and dist directories
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --ignore node_modules --ignore dist
+```
+
 - Replace all `oldText` with `newText` in file/folder names and file contents, recursively.
 - `-v "$PWD:/data"` mounts your current directory to `/data` in the container.
+- `.git/` directories are automatically ignored to protect version control.
 
 ---
 
@@ -25,8 +33,38 @@ docker run --rm -it -v "${PWD}:/data" ghcr.io/mitch-b/renamer oldText newText
 ## Features
 - **Recursively renames** files and folders matching a search string
 - **Replaces text** inside all files
+- **Smart ignore patterns**: Automatically ignores `.git/` directories and supports custom ignore patterns
 - **Preview**: Shows sample matches before making changes
 - **Interactive**: Asks for confirmation before proceeding
+
+---
+
+## Command Line Options
+
+```bash
+rename-find-replace.sh <find> <replace> [--skip-contents] [--ignore <pattern>]...
+```
+
+**Options:**
+- `--skip-contents`: Skip replacing text inside files (only rename files and folders)
+- `--ignore <pattern>`: Ignore paths matching pattern (can be used multiple times)
+
+**Default ignore patterns:** `.git/`
+
+**Examples:**
+```bash
+# Basic usage
+./rename-find-replace.sh oldText newText
+
+# Skip file content replacement
+./rename-find-replace.sh oldText newText --skip-contents
+
+# Ignore node_modules and dist directories
+./rename-find-replace.sh oldText newText --ignore node_modules --ignore dist
+
+# Combine options
+./rename-find-replace.sh oldText newText --skip-contents --ignore build --ignore temp
+```
 
 ---
 
