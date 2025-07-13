@@ -32,7 +32,7 @@ docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --in
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --no-defaults --ignore temp
 
 # Use custom ignore file from mounted volume (easy - just mount to default path!)
-docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/renamer-ignore.txt" ghcr.io/mitch-b/renamer oldText newText
+docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/.renamerignore" ghcr.io/mitch-b/renamer oldText newText
 
 # Or with custom path (advanced)
 docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/custom.txt" -e RENAMER_IGNORE_FILE=/custom.txt ghcr.io/mitch-b/renamer oldText newText
@@ -79,7 +79,7 @@ rename-find-replace.sh <find> <replace> [options...]
 1. **Built-in defaults**: `.git/`, `node_modules/` (unless `--no-defaults`)
 2. **`.renamerignore` files**:
    - `./renamerignore` (current directory/project-specific)
-   - `$RENAMER_IGNORE_FILE` (defaults to `/renamer-ignore.txt`, adjustable)
+   - `$RENAMER_IGNORE_FILE` (defaults to `/.renamerignore`, adjustable)
 3. **`--ignore` flags**: Command-line additional patterns
 4. **`--include` flags**: Override any ignores for specific patterns
 
@@ -107,7 +107,7 @@ rename-find-replace.sh <find> <replace> [options...]
 RENAMER_IGNORE_FILE=/path/to/my-patterns ./rename-find-replace.sh oldText newText
 
 # Or if file is already at default location:
-# (if /renamer-ignore.txt exists, it's automatically used)
+# (if /.renamerignore exists, it's automatically used)
 ./rename-find-replace.sh oldText newText
 
 # Combine options
@@ -136,7 +136,7 @@ echo "build" >> /path/to/my-global-patterns.txt
 # Mount the file to the default path - no environment variable needed!
 docker run --rm -it \
   -v "$PWD:/data" \
-  -v "/path/to/my-global-patterns.txt:/renamer-ignore.txt" \
+  -v "/path/to/my-global-patterns.txt:/.renamerignore" \
   ghcr.io/mitch-b/renamer oldText newText
 ```
 
@@ -156,7 +156,7 @@ docker run --rm -it \
 # (project patterns take priority, global patterns add to them)
 docker run --rm -it \
   -v "$PWD:/data" \
-  -v "$HOME/.config/renamer-patterns.txt:/renamer-ignore.txt" \
+  -v "$HOME/.config/renamer-patterns.txt:/.renamerignore" \
   ghcr.io/mitch-b/renamer oldText newText --ignore "temp,cache"
 ```
 

@@ -23,8 +23,8 @@ read_ignore_files() {
         ".renamerignore"                           # Current directory (project-specific)
     )
     
-    # Add custom file from environment variable (defaults to /renamer-ignore.txt for easy Docker mounting)
-    RENAMER_IGNORE_FILE="${RENAMER_IGNORE_FILE:-/renamer-ignore.txt}"
+    # Add custom file from environment variable (defaults to /.renamerignore for easy Docker mounting)
+    RENAMER_IGNORE_FILE="${RENAMER_IGNORE_FILE:-/.renamerignore}"
     if [[ -f "$RENAMER_IGNORE_FILE" ]]; then
         ignore_files+=("$RENAMER_IGNORE_FILE")
     fi
@@ -124,7 +124,7 @@ if [[ $# -lt 2 ]]; then
     echo "  1. Built-in defaults: .git/, node_modules/ (unless --no-defaults)"
     echo "  2. .renamerignore files:"
     echo "     - ./renamerignore (current directory/project-specific)"
-    echo "     - \$RENAMER_IGNORE_FILE (defaults to /renamer-ignore.txt, adjustable)"
+    echo "     - \$RENAMER_IGNORE_FILE (defaults to /.renamerignore, adjustable)"
     echo "  3. --ignore flags"
     echo "  4. --include flags override any ignores"
     echo ""
@@ -146,7 +146,7 @@ if [[ $# -lt 2 ]]; then
     echo "  $0 oldText newText --no-defaults --ignore node_modules"
     echo ""
     echo "  # Use custom global ignore file (Docker example - easy mounting)"
-    echo "  docker run -v /path/to/patterns:/renamer-ignore.txt ..."
+    echo "  docker run -v /path/to/patterns:/.renamerignore ..."
     echo ""
     echo "  # Or with custom path (advanced)"
     echo "  docker run -v /path/to/patterns:/custom.txt -e RENAMER_IGNORE_FILE=/custom.txt ..."
