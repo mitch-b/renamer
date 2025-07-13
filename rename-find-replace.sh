@@ -52,7 +52,6 @@ read_ignore_files() {
 
 # Parse arguments: positional for find/replace, optional flags
 SKIP_CONTENTS=0
-NO_DEFAULTS=0
 IGNORE_PATTERNS=()
 INCLUDE_PATTERNS=()
 POSITIONAL=()
@@ -60,10 +59,6 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-contents)
             SKIP_CONTENTS=1
-            shift
-            ;;
-        --no-defaults)
-            NO_DEFAULTS=1
             shift
             ;;
         --ignore)
@@ -117,7 +112,6 @@ if [[ $# -lt 2 ]]; then
     echo "  --skip-contents       Skip replacing text inside files"
     echo "  --ignore <pattern>    Ignore patterns (comma-separated or multiple flags)"
     echo "  --include <pattern>   Force include patterns (overrides ignores)"
-    echo "  --no-defaults        Disable built-in .git/ and node_modules/ protection"
     echo ""
     echo "Examples:"
     echo "  docker run --rm -it -v \"\$PWD:/data\" ghcr.io/mitch-b/renamer oldText newText"
@@ -128,21 +122,14 @@ fi
 FIND="$1"
 REPLACE="$2"
 
-# Default ignore patterns (common directories that should typically be excluded)
-if [[ $NO_DEFAULTS -eq 0 ]]; then
-    DEFAULT_IGNORE_PATTERNS=(".git" "node_modules")
-else
-    DEFAULT_IGNORE_PATTERNS=()
-fi
-
 # Read patterns from .renamerignore files
 ignore_file_result=$(read_ignore_files)
 IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
 FILE_IGNORE_PATTERNS=(${ignore_file_parts[0]})
 IGNORE_FILES_FOUND=(${ignore_file_parts[1]})
 
-# Combine ignore patterns: defaults + file + command line
-ALL_IGNORE_PATTERNS=("${DEFAULT_IGNORE_PATTERNS[@]}" "${FILE_IGNORE_PATTERNS[@]}" "${IGNORE_PATTERNS[@]}")
+# Combine ignore patterns: file + command line
+ALL_IGNORE_PATTERNS=("${FILE_IGNORE_PATTERNS[@]}" "${IGNORE_PATTERNS[@]}")
 
 # Remove patterns that are explicitly included
 FINAL_IGNORE_PATTERNS=()
@@ -174,11 +161,6 @@ echo -e "\e[36mLooking for:\e[0m '$FIND'  →  \e[36mReplacing with:\e[0m '$REPL
 # Show ignore patterns with sources
 if [[ ${#FINAL_IGNORE_PATTERNS[@]} -gt 0 ]]; then
     echo -e "\e[36mActive ignore patterns:\e[0m"
-    if [[ $NO_DEFAULTS -eq 0 && ${#DEFAULT_IGNORE_PATTERNS[@]} -gt 0 ]]; then
-        echo -e "  \e[90mDefaults:\e[0m ${DEFAULT_IGNORE_PATTERNS[*]}"
-    elif [[ $NO_DEFAULTS -eq 1 ]]; then
-        echo -e "  \e[90mDefaults:\e[0m disabled (--no-defaults)"
-    fi
     if [[ ${#FILE_IGNORE_PATTERNS[@]} -gt 0 ]]; then
         echo -e "  \e[90mFrom .renamerignore files:\e[0m ${FILE_IGNORE_PATTERNS[*]}"
         for file in "${IGNORE_FILES_FOUND[@]}"; do
@@ -193,9 +175,6 @@ if [[ ${#FINAL_IGNORE_PATTERNS[@]} -gt 0 ]]; then
     fi
 else
     echo -e "\e[36mNo ignore patterns active\e[0m"
-    if [[ $NO_DEFAULTS -eq 1 ]]; then
-        echo -e "  \e[90m(--no-defaults disabled built-in patterns)\e[0m"
-    fi
 fi
 echo
 
