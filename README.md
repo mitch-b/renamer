@@ -31,8 +31,11 @@ docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --in
 # Disable all defaults and use only custom patterns
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --no-defaults --ignore temp
 
-# Use custom ignore file from mounted volume
-docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/ignore.txt" -e RENAMER_IGNORE_FILE=/ignore.txt ghcr.io/mitch-b/renamer oldText newText
+# Use custom ignore file from mounted volume (easy - just mount to default path!)
+docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/renamer-ignore.txt" ghcr.io/mitch-b/renamer oldText newText
+
+# Or with custom path (advanced)
+docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/custom.txt" -e RENAMER_IGNORE_FILE=/custom.txt ghcr.io/mitch-b/renamer oldText newText
 ```
 
 - Replace all `oldText` with `newText` in file/folder names and file contents, recursively.
@@ -76,7 +79,7 @@ rename-find-replace.sh <find> <replace> [options...]
 1. **Built-in defaults**: `.git/`, `node_modules/` (unless `--no-defaults`)
 2. **`.renamerignore` files**:
    - `./renamerignore` (current directory/project-specific)
-   - `$RENAMER_IGNORE_FILE` (custom mounted file path)
+   - `$RENAMER_IGNORE_FILE` (defaults to `/renamer-ignore.txt`, adjustable)
 3. **`--ignore` flags**: Command-line additional patterns
 4. **`--include` flags**: Override any ignores for specific patterns
 
@@ -100,8 +103,12 @@ rename-find-replace.sh <find> <replace> [options...]
 # Disable all defaults and only ignore specific patterns
 ./rename-find-replace.sh oldText newText --no-defaults --ignore node_modules
 
-# Use custom global ignore file
+# Use custom global ignore file (simple mounting - no env var needed!)
 RENAMER_IGNORE_FILE=/path/to/my-patterns ./rename-find-replace.sh oldText newText
+
+# Or if file is already at default location:
+# (if /renamer-ignore.txt exists, it's automatically used)
+./rename-find-replace.sh oldText newText
 
 # Combine options
 ./rename-find-replace.sh oldText newText --skip-contents --ignore "temp,cache"
@@ -120,28 +127,36 @@ echo "*.log" >> .renamerignore
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
-**Custom mounted ignore file:**
+**Custom mounted ignore file (easy - just mount to default path!):**
 ```bash
 # Create patterns file on your host
 echo "custom_temp" > /path/to/my-global-patterns.txt
 echo "build" >> /path/to/my-global-patterns.txt
 
-# Mount the file and reference it via environment variable
+# Mount the file to the default path - no environment variable needed!
 docker run --rm -it \
   -v "$PWD:/data" \
-  -v "/path/to/my-global-patterns.txt:/ignore.txt" \
-  -e RENAMER_IGNORE_FILE=/ignore.txt \
+  -v "/path/to/my-global-patterns.txt:/renamer-ignore.txt" \
+  ghcr.io/mitch-b/renamer oldText newText
+```
+
+**Custom mounted ignore file (advanced - custom path):**
+```bash
+# Mount to a custom path and specify via environment variable
+docker run --rm -it \
+  -v "$PWD:/data" \
+  -v "/path/to/my-global-patterns.txt:/custom-ignore.txt" \
+  -e RENAMER_IGNORE_FILE=/custom-ignore.txt \
   ghcr.io/mitch-b/renamer oldText newText
 ```
 
 **Advanced Docker usage:**
 ```bash
-# Combine project .renamerignore with custom patterns
-# (project patterns take priority, custom patterns add to them)
+# Combine project .renamerignore with custom global patterns
+# (project patterns take priority, global patterns add to them)
 docker run --rm -it \
   -v "$PWD:/data" \
-  -v "$HOME/.config/renamer-patterns.txt:/global-ignore.txt" \
-  -e RENAMER_IGNORE_FILE=/global-ignore.txt \
+  -v "$HOME/.config/renamer-patterns.txt:/renamer-ignore.txt" \
   ghcr.io/mitch-b/renamer oldText newText --ignore "temp,cache"
 ```
 
