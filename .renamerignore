@@ -3,34 +3,15 @@
 # Blank lines are ignored
 # Patterns support shell globbing
 
-# Built-in essential directories (previously hardcoded)
-.git
-node_modules
-
 # Build directories
 dist
-build
-target
-out
-
-# Dependency directories  
-vendor
-.vendor
+bin
+obj
 
 # Cache directories
 .cache
 tmp
 temp
-
-# Log files
-*.log
-logs
-
-# IDE files
-.vscode
-.idea
-*.swp
-*.swo
 
 # OS files
 .DS_Store
