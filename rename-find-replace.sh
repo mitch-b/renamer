@@ -13,35 +13,57 @@ print_header() {
 }
 
 
-# Function to read ignore patterns from .renamerignore file
-read_ignore_file() {
-    local ignore_file=".renamerignore"
+# Function to read ignore patterns from .renamerignore files
+read_ignore_files() {
     local patterns=()
+    local files_found=()
     
-    if [[ -f "$ignore_file" ]]; then
-        while IFS= read -r line; do
-            # Skip empty lines and comments
-            if [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then
-                # Trim whitespace
-                line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                if [[ -n "$line" ]]; then
-                    patterns+=("$line")
-                fi
-            fi
-        done < "$ignore_file"
+    # Define potential .renamerignore file locations in priority order
+    local ignore_files=(
+        ".renamerignore"                           # Current directory (highest priority)
+        "$HOME/.renamerignore"                     # User home directory
+    )
+    
+    # Add custom file from environment variable if set
+    if [[ -n "$RENAMER_IGNORE_FILE" ]]; then
+        ignore_files+=("$RENAMER_IGNORE_FILE")
     fi
     
-    echo "${patterns[@]}"
+    # Read from all existing files
+    for ignore_file in "${ignore_files[@]}"; do
+        if [[ -f "$ignore_file" ]]; then
+            files_found+=("$ignore_file")
+            while IFS= read -r line; do
+                # Skip empty lines and comments
+                if [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then
+                    # Trim whitespace
+                    line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    if [[ -n "$line" ]]; then
+                        patterns+=("$line")
+                    fi
+                fi
+            done < "$ignore_file"
+        fi
+    done
+    
+    # Output format: "patterns|files_found"
+    printf "%s|%s" "${patterns[*]}" "${files_found[*]}"
 }
 
 # Parse arguments: positional for find/replace, optional flags
 SKIP_CONTENTS=0
+NO_DEFAULTS=0
 IGNORE_PATTERNS=()
+INCLUDE_PATTERNS=()
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-contents)
             SKIP_CONTENTS=1
+            shift
+            ;;
+        --no-defaults)
+            NO_DEFAULTS=1
             shift
             ;;
         --ignore)
@@ -61,6 +83,23 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
+        --include)
+            if [[ -n "$2" && "$2" != --* ]]; then
+                # Support comma-separated patterns
+                IFS=',' read -ra PATTERNS <<< "$2"
+                for pattern in "${PATTERNS[@]}"; do
+                    # Trim whitespace
+                    pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    if [[ -n "$pattern" ]]; then
+                        INCLUDE_PATTERNS+=("$pattern")
+                    fi
+                done
+                shift 2
+            else
+                echo "Error: --include requires a pattern argument"
+                exit 1
+            fi
+            ;;
         *)
             POSITIONAL+=("$1")
             shift
@@ -70,16 +109,25 @@ done
 set -- "${POSITIONAL[@]}"
 
 if [[ $# -lt 2 ]]; then
-    echo "Usage: $0 <find> <replace> [--skip-contents] [--ignore <pattern>]..."
-    echo "  --skip-contents: Skip replacing text inside files"
-    echo "  --ignore <pattern>: Ignore paths matching pattern(s)"
-    echo "                     Supports comma-separated: --ignore 'build,dist,temp'"
-    echo "                     Can be used multiple times: --ignore build --ignore dist"
+    echo "Usage: $0 <find> <replace> [options...]"
     echo ""
-    echo "Ignore patterns are read from:"
-    echo "  1. Built-in defaults: .git/, node_modules/"
-    echo "  2. .renamerignore file (if present)"
+    echo "Options:"
+    echo "  --skip-contents       Skip replacing text inside files"
+    echo "  --ignore <pattern>    Ignore paths matching pattern(s)"
+    echo "                       Supports comma-separated: --ignore 'build,dist,temp'"
+    echo "                       Can be used multiple times: --ignore build --ignore dist"
+    echo "  --include <pattern>   Force include patterns even if ignored elsewhere"
+    echo "                       Useful to override defaults: --include .git"
+    echo "  --no-defaults        Disable built-in default ignore patterns"
+    echo ""
+    echo "Ignore patterns are read from (in order):"
+    echo "  1. Built-in defaults: .git/, node_modules/ (unless --no-defaults)"
+    echo "  2. .renamerignore files:"
+    echo "     - ./renamerignore (current directory)"
+    echo "     - ~/.renamerignore (user home directory)"
+    echo "     - \$RENAMER_IGNORE_FILE (custom file path)"
     echo "  3. --ignore flags"
+    echo "  4. --include flags override any ignores"
     echo ""
     echo "Example .renamerignore file:"
     echo "  # Common build artifacts"
@@ -87,23 +135,59 @@ if [[ $# -lt 2 ]]; then
     echo "  build"
     echo "  target"
     echo "  *.log"
+    echo ""
+    echo "Examples:"
+    echo "  # Basic usage with defaults"
+    echo "  $0 oldText newText"
+    echo ""
+    echo "  # Include .git directory (override default)"
+    echo "  $0 oldText newText --include .git"
+    echo ""
+    echo "  # Disable all defaults and only ignore specific patterns"
+    echo "  $0 oldText newText --no-defaults --ignore node_modules"
+    echo ""
+    echo "  # Use custom global ignore file"
+    echo "  RENAMER_IGNORE_FILE=/path/to/my-patterns $0 oldText newText"
     exit 1
 fi
 FIND="$1"
 REPLACE="$2"
 
 # Default ignore patterns (common directories that should typically be excluded)
-DEFAULT_IGNORE_PATTERNS=(".git" "node_modules")
+if [[ $NO_DEFAULTS -eq 0 ]]; then
+    DEFAULT_IGNORE_PATTERNS=(".git" "node_modules")
+else
+    DEFAULT_IGNORE_PATTERNS=()
+fi
 
-# Read patterns from .renamerignore file
-FILE_IGNORE_PATTERNS=($(read_ignore_file))
+# Read patterns from .renamerignore files
+ignore_file_result=$(read_ignore_files)
+IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
+FILE_IGNORE_PATTERNS=(${ignore_file_parts[0]})
+IGNORE_FILES_FOUND=(${ignore_file_parts[1]})
 
-# Combine all ignore patterns: defaults + file + command line
+# Combine ignore patterns: defaults + file + command line
 ALL_IGNORE_PATTERNS=("${DEFAULT_IGNORE_PATTERNS[@]}" "${FILE_IGNORE_PATTERNS[@]}" "${IGNORE_PATTERNS[@]}")
+
+# Remove patterns that are explicitly included
+FINAL_IGNORE_PATTERNS=()
+for ignore_pattern in "${ALL_IGNORE_PATTERNS[@]}"; do
+    should_ignore=1
+    for include_pattern in "${INCLUDE_PATTERNS[@]}"; do
+        # Simple pattern matching - if include pattern matches ignore pattern, don't ignore it
+        if [[ "$ignore_pattern" == "$include_pattern" || "$ignore_pattern" == "${include_pattern%/}" || "${ignore_pattern%/}" == "$include_pattern" ]]; then
+            should_ignore=0
+            break
+        fi
+    done
+    if [[ $should_ignore -eq 1 ]]; then
+        FINAL_IGNORE_PATTERNS+=("$ignore_pattern")
+    fi
+done
 
 # Build find exclusions array
 FIND_EXCLUSIONS=()
-for pattern in "${ALL_IGNORE_PATTERNS[@]}"; do
+for pattern in "${FINAL_IGNORE_PATTERNS[@]}"; do
     FIND_EXCLUSIONS+=("-not" "-path" "./${pattern}*")
 done
 
@@ -113,16 +197,29 @@ echo -e "\e[36mCurrent directory: \e[0m$(pwd)"
 echo -e "\e[36mLooking for:\e[0m '$FIND'  →  \e[36mReplacing with:\e[0m '$REPLACE'"
 
 # Show ignore patterns with sources
-if [[ ${#ALL_IGNORE_PATTERNS[@]} -gt 0 ]]; then
-    echo -e "\e[36mIgnore patterns:\e[0m"
-    if [[ ${#DEFAULT_IGNORE_PATTERNS[@]} -gt 0 ]]; then
+if [[ ${#FINAL_IGNORE_PATTERNS[@]} -gt 0 ]]; then
+    echo -e "\e[36mActive ignore patterns:\e[0m"
+    if [[ $NO_DEFAULTS -eq 0 && ${#DEFAULT_IGNORE_PATTERNS[@]} -gt 0 ]]; then
         echo -e "  \e[90mDefaults:\e[0m ${DEFAULT_IGNORE_PATTERNS[*]}"
+    elif [[ $NO_DEFAULTS -eq 1 ]]; then
+        echo -e "  \e[90mDefaults:\e[0m disabled (--no-defaults)"
     fi
     if [[ ${#FILE_IGNORE_PATTERNS[@]} -gt 0 ]]; then
-        echo -e "  \e[90mFrom .renamerignore:\e[0m ${FILE_IGNORE_PATTERNS[*]}"
+        echo -e "  \e[90mFrom .renamerignore files:\e[0m ${FILE_IGNORE_PATTERNS[*]}"
+        for file in "${IGNORE_FILES_FOUND[@]}"; do
+            echo -e "    \e[90m→ $file\e[0m"
+        done
     fi
     if [[ ${#IGNORE_PATTERNS[@]} -gt 0 ]]; then
         echo -e "  \e[90mFrom --ignore flags:\e[0m ${IGNORE_PATTERNS[*]}"
+    fi
+    if [[ ${#INCLUDE_PATTERNS[@]} -gt 0 ]]; then
+        echo -e "  \e[90mForced includes (override ignores):\e[0m ${INCLUDE_PATTERNS[*]}"
+    fi
+else
+    echo -e "\e[36mNo ignore patterns active\e[0m"
+    if [[ $NO_DEFAULTS -eq 1 ]]; then
+        echo -e "  \e[90m(--no-defaults disabled built-in patterns)\e[0m"
     fi
 fi
 echo
