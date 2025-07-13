@@ -3,6 +3,10 @@
 # Blank lines are ignored
 # Patterns support shell globbing
 
+# Built-in essential directories (previously hardcoded)
+.git
+node_modules
+
 # Build directories
 dist
 bin
