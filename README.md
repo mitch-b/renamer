@@ -15,13 +15,21 @@ docker run --rm -it -v "${PWD}:/data" ghcr.io/mitch-b/renamer oldText newText
 **With ignore patterns:**
 
 ```bash
-# Ignore node_modules and dist directories
+# Using comma-separated patterns (new, less verbose!)
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --ignore "dist,build,logs"
+
+# Using multiple flags (still supported)
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --ignore node_modules --ignore dist
+
+# Using .renamerignore file (best for projects with consistent patterns)
+# Create .renamerignore in your project, then run:
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 ```
 
 - Replace all `oldText` with `newText` in file/folder names and file contents, recursively.
 - `-v "$PWD:/data"` mounts your current directory to `/data` in the container.
-- `.git/` directories are automatically ignored to protect version control.
+- `.git/` and `node_modules/` directories are automatically ignored to protect version control and dependencies.
+- Support for `.renamerignore` files for project-specific patterns.
 
 ---
 
@@ -33,7 +41,7 @@ docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --ig
 ## Features
 - **Recursively renames** files and folders matching a search string
 - **Replaces text** inside all files
-- **Smart ignore patterns**: Automatically ignores `.git/` directories and supports custom ignore patterns
+- **Smart ignore patterns**: Automatically ignores `.git/` and `node_modules/` directories, supports `.renamerignore` files, and custom ignore patterns
 - **Preview**: Shows sample matches before making changes
 - **Interactive**: Asks for confirmation before proceeding
 
@@ -47,24 +55,45 @@ rename-find-replace.sh <find> <replace> [--skip-contents] [--ignore <pattern>]..
 
 **Options:**
 - `--skip-contents`: Skip replacing text inside files (only rename files and folders)
-- `--ignore <pattern>`: Ignore paths matching pattern (can be used multiple times)
+- `--ignore <pattern>`: Ignore paths matching pattern(s)
+  - Supports comma-separated: `--ignore "build,dist,temp"`
+  - Can be used multiple times: `--ignore build --ignore dist`
 
-**Default ignore patterns:** `.git/`
+**Ignore pattern sources (applied in order):**
+1. **Built-in defaults**: `.git/`, `node_modules/`
+2. **`.renamerignore` file**: Project-specific patterns (if file exists)
+3. **`--ignore` flags**: Command-line overrides
 
 **Examples:**
 ```bash
-# Basic usage
+# Basic usage (uses built-in defaults)
 ./rename-find-replace.sh oldText newText
 
 # Skip file content replacement
 ./rename-find-replace.sh oldText newText --skip-contents
 
-# Ignore node_modules and dist directories
+# Add patterns via comma-separated list (less verbose!)
+./rename-find-replace.sh oldText newText --ignore "dist,build,logs"
+
+# Add patterns via multiple flags (still supported)
 ./rename-find-replace.sh oldText newText --ignore node_modules --ignore dist
 
 # Combine options
-./rename-find-replace.sh oldText newText --skip-contents --ignore build --ignore temp
+./rename-find-replace.sh oldText newText --skip-contents --ignore "temp,cache"
 ```
+
+**Using .renamerignore file:**
+```bash
+# Create .renamerignore in your project root
+echo "dist" >> .renamerignore
+echo "build" >> .renamerignore
+echo "*.log" >> .renamerignore
+
+# Then run without --ignore flags
+./rename-find-replace.sh oldText newText
+```
+
+See `.renamerignore.example` for a comprehensive example file.
 
 ---
 
