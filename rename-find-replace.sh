@@ -20,11 +20,10 @@ read_ignore_files() {
     
     # Define potential .renamerignore file locations in priority order
     local ignore_files=(
-        ".renamerignore"                           # Current directory (highest priority)
-        "$HOME/.renamerignore"                     # User home directory
+        ".renamerignore"                           # Current directory (project-specific)
     )
     
-    # Add custom file from environment variable if set
+    # Add custom file from environment variable if set (for mounted global patterns)
     if [[ -n "$RENAMER_IGNORE_FILE" ]]; then
         ignore_files+=("$RENAMER_IGNORE_FILE")
     fi
@@ -123,9 +122,8 @@ if [[ $# -lt 2 ]]; then
     echo "Ignore patterns are read from (in order):"
     echo "  1. Built-in defaults: .git/, node_modules/ (unless --no-defaults)"
     echo "  2. .renamerignore files:"
-    echo "     - ./renamerignore (current directory)"
-    echo "     - ~/.renamerignore (user home directory)"
-    echo "     - \$RENAMER_IGNORE_FILE (custom file path)"
+    echo "     - ./renamerignore (current directory/project-specific)"
+    echo "     - \$RENAMER_IGNORE_FILE (custom mounted file path)"
     echo "  3. --ignore flags"
     echo "  4. --include flags override any ignores"
     echo ""
@@ -146,8 +144,8 @@ if [[ $# -lt 2 ]]; then
     echo "  # Disable all defaults and only ignore specific patterns"
     echo "  $0 oldText newText --no-defaults --ignore node_modules"
     echo ""
-    echo "  # Use custom global ignore file"
-    echo "  RENAMER_IGNORE_FILE=/path/to/my-patterns $0 oldText newText"
+    echo "  # Use custom global ignore file (Docker example)"
+    echo "  docker run -v /path/to/patterns:/ignore.txt -e RENAMER_IGNORE_FILE=/ignore.txt ..."
     exit 1
 fi
 FIND="$1"

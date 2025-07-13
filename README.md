@@ -31,14 +31,14 @@ docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --in
 # Disable all defaults and use only custom patterns
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --no-defaults --ignore temp
 
-# Use global ignore file from mounted volume
-docker run --rm -it -v "$PWD:/data" -v "$HOME:/home/user" -e RENAMER_IGNORE_FILE=/home/user/.global-renamerignore ghcr.io/mitch-b/renamer oldText newText
+# Use custom ignore file from mounted volume
+docker run --rm -it -v "$PWD:/data" -v "/path/to/my-patterns.txt:/ignore.txt" -e RENAMER_IGNORE_FILE=/ignore.txt ghcr.io/mitch-b/renamer oldText newText
 ```
 
 - Replace all `oldText` with `newText` in file/folder names and file contents, recursively.
 - `-v "$PWD:/data"` mounts your current directory to `/data` in the container.
 - `.git/` and `node_modules/` directories are automatically ignored to protect version control and dependencies.
-- Support for flexible `.renamerignore` files for project-specific and global patterns.
+- Support for flexible `.renamerignore` files for project-specific patterns and custom mounted ignore files.
 - Override capabilities for power users who need to edit typically protected directories.
 
 ---
@@ -75,9 +75,8 @@ rename-find-replace.sh <find> <replace> [options...]
 **Ignore pattern sources (applied in order):**
 1. **Built-in defaults**: `.git/`, `node_modules/` (unless `--no-defaults`)
 2. **`.renamerignore` files**:
-   - `./renamerignore` (current directory, highest priority)
-   - `~/.renamerignore` (user home directory)
-   - `$RENAMER_IGNORE_FILE` (custom file path via environment variable)
+   - `./renamerignore` (current directory/project-specific)
+   - `$RENAMER_IGNORE_FILE` (custom mounted file path)
 3. **`--ignore` flags**: Command-line additional patterns
 4. **`--include` flags**: Override any ignores for specific patterns
 
@@ -108,7 +107,45 @@ RENAMER_IGNORE_FILE=/path/to/my-patterns ./rename-find-replace.sh oldText newTex
 ./rename-find-replace.sh oldText newText --skip-contents --ignore "temp,cache"
 ```
 
-**Using .renamerignore files:**
+## Docker Usage with Ignore Files
+
+**Project-specific (.renamerignore in current directory):**
+```bash
+# Create .renamerignore in your project root
+echo "dist" >> .renamerignore
+echo "build" >> .renamerignore
+echo "*.log" >> .renamerignore
+
+# Mount your project directory (includes .renamerignore automatically)
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
+```
+
+**Custom mounted ignore file:**
+```bash
+# Create patterns file on your host
+echo "custom_temp" > /path/to/my-global-patterns.txt
+echo "build" >> /path/to/my-global-patterns.txt
+
+# Mount the file and reference it via environment variable
+docker run --rm -it \
+  -v "$PWD:/data" \
+  -v "/path/to/my-global-patterns.txt:/ignore.txt" \
+  -e RENAMER_IGNORE_FILE=/ignore.txt \
+  ghcr.io/mitch-b/renamer oldText newText
+```
+
+**Advanced Docker usage:**
+```bash
+# Combine project .renamerignore with custom patterns
+# (project patterns take priority, custom patterns add to them)
+docker run --rm -it \
+  -v "$PWD:/data" \
+  -v "$HOME/.config/renamer-patterns.txt:/global-ignore.txt" \
+  -e RENAMER_IGNORE_FILE=/global-ignore.txt \
+  ghcr.io/mitch-b/renamer oldText newText --ignore "temp,cache"
+```
+
+**Using .renamerignore files (Local Development):**
 
 *Project-specific (.renamerignore in current directory):*
 ```bash
@@ -121,23 +158,12 @@ echo "*.log" >> .renamerignore
 ./rename-find-replace.sh oldText newText
 ```
 
-*User-global (~/.renamerignore):*
-```bash
-# Create global patterns in your home directory
-echo "tmp" >> ~/.renamerignore
-echo "cache" >> ~/.renamerignore
-echo ".DS_Store" >> ~/.renamerignore
-
-# These patterns apply to all projects unless overridden
-./rename-find-replace.sh oldText newText
-```
-
 *Custom location (via environment variable):*
 ```bash
 # Create patterns file anywhere
 echo "custom_temp" > /path/to/my-patterns
 
-# Use it via environment variable
+# Use it via environment variable  
 RENAMER_IGNORE_FILE=/path/to/my-patterns ./rename-find-replace.sh oldText newText
 ```
 
