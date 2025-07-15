@@ -58,7 +58,7 @@ To make this easier to run, configure an alias:
     add contents:
 
     ```bash
-    renamer='docker run --rm -itq --pull always -v "$PWD:/data" ghcr.io/mitch-b/renamer'
+    alias renamer='docker run --rm -itq --pull always -v "$PWD:/data" ghcr.io/mitch-b/renamer'
     ```
 
 * ### powershell
