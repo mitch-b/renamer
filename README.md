@@ -70,7 +70,7 @@ To make this easier to run, configure an alias:
     add contents:
 
     ```powershell
-    function renamer { docker run --rm -itq --pull always -v "$PWD:/data" ghcr.io/mitch-b/renamer $args }
+    function renamer { docker run --rm -itq --pull always -v "${PWD}:/data" ghcr.io/mitch-b/renamer $args }
     ```
 
 ✅ Now you can use with a shortened syntax:
