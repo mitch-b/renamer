@@ -50,6 +50,97 @@ read_ignore_files() {
     printf "%s|%s" "${patterns[*]}" "${files_found[*]}"
 }
 
+# Function to parse gitignore-style patterns and build find exclusions
+build_find_exclusions() {
+    local patterns=("$@")
+    local exclusions=()
+    local negation_patterns=()
+    
+    # First pass: collect non-negation patterns
+    for pattern in "${patterns[@]}"; do
+        # Skip negation patterns for now
+        if [[ "$pattern" =~ ^! ]]; then
+            # Store negation patterns for second pass
+            negation_patterns+=("${pattern#!}")
+            continue
+        fi
+        
+        # Handle recursive directory patterns (**/dir/)
+        if [[ "$pattern" =~ ^\*\*/.*/$ ]]; then
+            # Remove **/ prefix and trailing /
+            local dir_name="${pattern#**/}"
+            dir_name="${dir_name%/}"
+            exclusions+=("-path" "*/${dir_name}/*")
+            exclusions+=("-o" "-path" "*/${dir_name}")
+        # Handle recursive file patterns (**/file)
+        elif [[ "$pattern" =~ ^\*\*/ ]]; then
+            # Remove **/ prefix
+            local file_pattern="${pattern#**/}"
+            exclusions+=("-path" "*/${file_pattern}")
+        # Handle directory-only patterns (dir/)
+        elif [[ "$pattern" =~ /$ ]]; then
+            # Remove trailing /
+            local dir_name="${pattern%/}"
+            exclusions+=("-path" "./${dir_name}/*")
+            exclusions+=("-o" "-path" "./${dir_name}")
+        # Handle simple patterns
+        else
+            exclusions+=("-path" "./${pattern}*")
+        fi
+        
+        # Add -o connector if this isn't the last exclusion and we have more patterns to process
+        if [[ ${#exclusions[@]} -gt 0 ]]; then
+            exclusions+=("-o")
+        fi
+    done
+    
+    # Remove trailing -o if it exists
+    if [[ ${#exclusions[@]} -gt 0 && "${exclusions[-1]}" == "-o" ]]; then
+        unset 'exclusions[-1]'
+    fi
+    
+    # Second pass: handle negation patterns by creating include conditions  
+    local include_conditions=()
+    for neg_pattern in "${negation_patterns[@]}"; do
+        # Handle recursive file patterns in negations (**/file)
+        if [[ "$neg_pattern" =~ ^\*\*/ ]]; then
+            # Remove **/ prefix
+            local file_pattern="${neg_pattern#**/}"
+            include_conditions+=("-path" "*/${file_pattern}")
+        # Handle directory-only patterns in negations (dir/)
+        elif [[ "$neg_pattern" =~ /$ ]]; then
+            # Remove trailing /
+            local dir_name="${neg_pattern%/}"
+            include_conditions+=("-path" "./${dir_name}/*")
+            include_conditions+=("-o" "-path" "./${dir_name}")
+        # Handle simple patterns in negations
+        else
+            include_conditions+=("-path" "./${neg_pattern}*")
+        fi
+        
+        # Add -o connector if this isn't the last condition and we have more negation patterns
+        if [[ ${#include_conditions[@]} -gt 0 ]]; then
+            include_conditions+=("-o")
+        fi
+    done
+    
+    # Remove trailing -o if it exists
+    if [[ ${#include_conditions[@]} -gt 0 && "${include_conditions[-1]}" == "-o" ]]; then
+        unset 'include_conditions[-1]'
+    fi
+    
+    # Output format: if we have exclusions, wrap them in -not -( ... -), then add include conditions
+    if [[ ${#exclusions[@]} -gt 0 ]]; then
+        printf "%s\n" "-not" "-(" "${exclusions[@]}" "-)"
+    fi
+    
+    # If we have negation patterns, output a separator and then include conditions
+    if [[ ${#include_conditions[@]} -gt 0 ]]; then
+        printf "NEGATION_SEPARATOR\n"
+        printf "%s\n" "${include_conditions[@]}"
+    fi
+}
+
 # Parse arguments: positional for find/replace, optional flags
 SKIP_CONTENTS=0
 IGNORE_PATTERNS=()
@@ -131,7 +222,7 @@ IGNORE_FILES_FOUND=(${ignore_file_parts[1]})
 # Combine ignore patterns: file + command line
 ALL_IGNORE_PATTERNS=("${FILE_IGNORE_PATTERNS[@]}" "${IGNORE_PATTERNS[@]}")
 
-# Remove patterns that are explicitly included
+# Remove patterns that are explicitly included using --include flag
 FINAL_IGNORE_PATTERNS=()
 for ignore_pattern in "${ALL_IGNORE_PATTERNS[@]}"; do
     should_ignore=1
@@ -147,11 +238,21 @@ for ignore_pattern in "${ALL_IGNORE_PATTERNS[@]}"; do
     fi
 done
 
-# Build find exclusions array
+# Build find exclusions using gitignore-style pattern parsing
+FIND_EXCLUSIONS_OUTPUT=$(build_find_exclusions "${FINAL_IGNORE_PATTERNS[@]}")
 FIND_EXCLUSIONS=()
-for pattern in "${FINAL_IGNORE_PATTERNS[@]}"; do
-    FIND_EXCLUSIONS+=("-not" "-path" "./${pattern}*")
-done
+NEGATION_CONDITIONS=()
+reading_negations=false
+
+while IFS= read -r line; do
+    if [[ "$line" == "NEGATION_SEPARATOR" ]]; then
+        reading_negations=true
+    elif [[ "$reading_negations" == true ]]; then
+        NEGATION_CONDITIONS+=("$line")
+    else
+        FIND_EXCLUSIONS+=("$line")
+    fi
+done <<< "$FIND_EXCLUSIONS_OUTPUT"
 
 print_header
 
@@ -162,7 +263,7 @@ echo -e "\e[36mLooking for:\e[0m '$FIND'  →  \e[36mReplacing with:\e[0m '$REPL
 if [[ ${#FINAL_IGNORE_PATTERNS[@]} -gt 0 ]]; then
     echo -e "\e[36mActive ignore patterns:\e[0m"
     if [[ ${#FILE_IGNORE_PATTERNS[@]} -gt 0 ]]; then
-        echo -e "  \e[90mFrom .renamerignore files:\e[0m ${FILE_IGNORE_PATTERNS[*]}"
+        echo -e "  \e[90mFrom .renamerignore files:\e[0m ${FINAL_IGNORE_PATTERNS[*]}"
         for file in "${IGNORE_FILES_FOUND[@]}"; do
             echo -e "    \e[90m→ $file\e[0m"
         done
@@ -173,6 +274,9 @@ if [[ ${#FINAL_IGNORE_PATTERNS[@]} -gt 0 ]]; then
     if [[ ${#INCLUDE_PATTERNS[@]} -gt 0 ]]; then
         echo -e "  \e[90mForced includes (override ignores):\e[0m ${INCLUDE_PATTERNS[*]}"
     fi
+    if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+        echo -e "  \e[90mNegation patterns found:\e[0m Processed internally"
+    fi
 else
     echo -e "\e[36mNo ignore patterns active\e[0m"
 fi
@@ -180,16 +284,34 @@ echo
 
 # Preview matches
 echo -e "\e[33mSample matching file names:\e[0m"
-find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | head -n 5
+if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+    # With negation conditions: (exclusions) OR (negations)
+    find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | head -n 5
+else
+    # Without negation conditions: just exclusions
+    find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | head -n 5
+fi
 
 echo -e "\n\e[33mSample matching folder names:\e[0m"
-find . -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | head -n 5
+if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+    # With negation conditions: (exclusions) OR (negations)
+    find . -type d \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | head -n 5
+else
+    # Without negation conditions: just exclusions
+    find . -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | head -n 5
+fi
 
 
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     echo -e "\n\e[33mSample file content matches:\e[0m"
     # Use find to get files that don't match ignore patterns, then grep those
-    find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$FIND" {} \; | head -n 5
+    if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+        # With negation conditions: (exclusions) OR (negations)
+        find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -exec grep -l "$FIND" {} \; | head -n 5
+    else
+        # Without negation conditions: just exclusions
+        find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$FIND" {} \; | head -n 5
+    fi
 else
     echo -e "\n\e[33mSkipping file content preview (--skip-contents)\e[0m"
 fi
@@ -202,27 +324,55 @@ read -p "Proceed with find-and-replace? [y/N] " confirm
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     echo -e "\n\e[32mReplacing contents...\e[0m"
     # Replace in file contents, respecting ignore patterns
-    find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$FIND" {} \; | xargs -r sed -i "s/$FIND/$REPLACE/g"
+    if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+        # With negation conditions: (exclusions) OR (negations)
+        find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -exec grep -l "$FIND" {} \; | xargs -r sed -i "s/$FIND/$REPLACE/g"
+    else
+        # Without negation conditions: just exclusions
+        find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$FIND" {} \; | xargs -r sed -i "s/$FIND/$REPLACE/g"
+    fi
 else
     echo -e "\n\e[32mSkipping file content replacement (--skip-contents)\e[0m"
 fi
 
 echo -e "\n\e[32mRenaming directories...\e[0m"
 # Rename directories first (depth-first to avoid path issues)
-find . -depth -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | while read dir; do
-    newdir="${dir//$FIND/$REPLACE}"
-    if [[ "$dir" != "$newdir" && ! -e "$newdir" ]]; then
-        mv "$dir" "$newdir"
-    fi
-done
+if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+    # With negation conditions: (exclusions) OR (negations)
+    find . -depth -type d \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | while read dir; do
+        newdir="${dir//$FIND/$REPLACE}"
+        if [[ "$dir" != "$newdir" && ! -e "$newdir" ]]; then
+            mv "$dir" "$newdir"
+        fi
+    done
+else
+    # Without negation conditions: just exclusions
+    find . -depth -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | while read dir; do
+        newdir="${dir//$FIND/$REPLACE}"
+        if [[ "$dir" != "$newdir" && ! -e "$newdir" ]]; then
+            mv "$dir" "$newdir"
+        fi
+    done
+fi
 
 echo -e "\n\e[32mRenaming files...\e[0m"
 # Rename files after folders are renamed
-find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | while read file; do
-    newfile="${file//$FIND/$REPLACE}"
-    if [[ "$file" != "$newfile" && ! -e "$newfile" ]]; then
-        mv "$file" "$newfile"
-    fi
-done
+if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+    # With negation conditions: (exclusions) OR (negations)
+    find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | while read file; do
+        newfile="${file//$FIND/$REPLACE}"
+        if [[ "$file" != "$newfile" && ! -e "$newfile" ]]; then
+            mv "$file" "$newfile"
+        fi
+    done
+else
+    # Without negation conditions: just exclusions
+    find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | while read file; do
+        newfile="${file//$FIND/$REPLACE}"
+        if [[ "$file" != "$newfile" && ! -e "$newfile" ]]; then
+            mv "$file" "$newfile"
+        fi
+    done
+fi
 
 echo -e "\n\e[1;32m🎉 Done.\e[0m"
