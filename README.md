@@ -29,12 +29,30 @@ docker run --rm -it -v "$PWD:/data" -v "/path/to/.renamerignore:/.renamerignore"
 - **Project-specific**: Create `.renamerignore` in your project directory (merges with defaults)
 - **Custom**: Mount `.renamerignore` files to `/.renamerignore` in container (overrides defaults)
 
+### Pattern Syntax
+
+Supports **gitignore-style patterns**:
+
+- `dist` - Simple patterns (files or directories)
+- `build/` - Directory-only patterns (trailing `/`)  
+- `**/logs/` - Recursive directory patterns (ignore all `logs/` directories at any depth)
+- `**/*.tmp` - Recursive file patterns (ignore all `.tmp` files at any depth)
+- `!important.log` - Negation patterns (include exceptions to ignored patterns)
+- `!**/logs/keep.*` - Recursive negation (keep specific files even in ignored directories)
+
 **Example .renamerignore:**
 ```
-dist
-build
+# Ignore all build directories
+**/build/
+
+# But keep important config files
+!**/build/config.json
+
+# Ignore log files
 *.log
-temp
+
+# But keep error logs  
+!error.log
 ```
 
 ## Options

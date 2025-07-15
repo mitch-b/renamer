@@ -1,7 +1,7 @@
 # Renamer ignore patterns
 # Lines starting with # are comments
 # Blank lines are ignored
-# Patterns support shell globbing
+# Patterns support gitignore-style globbing
 
 # Built-in essential directories (previously hardcoded)
 .git
@@ -23,3 +23,8 @@ Thumbs.db
 
 # Custom project-specific patterns
 # Add your own patterns below:
+
+# Examples of gitignore-style patterns:
+# **/logs/              # Ignore all logs directories recursively
+# !**/logs/important.*  # Exception: keep important log files
+# **/*.tmp              # Ignore all .tmp files at any depth
