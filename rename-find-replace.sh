@@ -216,8 +216,9 @@ REPLACE="$2"
 # Read patterns from .renamerignore files
 ignore_file_result=$(read_ignore_files)
 IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
-FILE_IGNORE_PATTERNS=(${ignore_file_parts[0]})
-IGNORE_FILES_FOUND=(${ignore_file_parts[1]})
+# Prevent globbing during array assignment by using proper quoting
+IFS=' ' read -ra FILE_IGNORE_PATTERNS <<< "${ignore_file_parts[0]}"
+IFS=' ' read -ra IGNORE_FILES_FOUND <<< "${ignore_file_parts[1]}"
 
 # Combine ignore patterns: file + command line
 ALL_IGNORE_PATTERNS=("${FILE_IGNORE_PATTERNS[@]}" "${IGNORE_PATTERNS[@]}")
@@ -263,7 +264,7 @@ echo -e "\e[36mLooking for:\e[0m '$FIND'  →  \e[36mReplacing with:\e[0m '$REPL
 if [[ ${#FINAL_IGNORE_PATTERNS[@]} -gt 0 ]]; then
     echo -e "\e[36mActive ignore patterns:\e[0m"
     if [[ ${#FILE_IGNORE_PATTERNS[@]} -gt 0 ]]; then
-        echo -e "  \e[90mFrom .renamerignore files:\e[0m ${FINAL_IGNORE_PATTERNS[*]}"
+        echo -e "  \e[90mFrom .renamerignore files:\e[0m ${FILE_IGNORE_PATTERNS[*]}"
         for file in "${IGNORE_FILES_FOUND[@]}"; do
             echo -e "    \e[90m→ $file\e[0m"
         done
