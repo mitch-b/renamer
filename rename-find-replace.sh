@@ -85,7 +85,10 @@ build_find_exclusions() {
             exclusions+=("-o" "-path" "./${dir_name}")
         # Handle simple patterns
         else
-            exclusions+=("-path" "./${pattern}*")
+            # Match exact name anywhere in tree (like gitignore)
+            exclusions+=("-path" "*/${pattern}")
+            exclusions+=("-o" "-path" "./${pattern}")
+            exclusions+=("-o" "-path" "*/${pattern}/*")
         fi
         
         # Add -o connector if this isn't the last exclusion and we have more patterns to process
