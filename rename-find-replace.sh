@@ -81,7 +81,9 @@ build_find_exclusions() {
         elif [[ "$pattern" =~ /$ ]]; then
             # Remove trailing /
             local dir_name="${pattern%/}"
-            exclusions+=("-path" "./${dir_name}/*")
+            exclusions+=("-path" "*/${dir_name}/*")
+            exclusions+=("-o" "-path" "*/${dir_name}")
+            exclusions+=("-o" "-path" "./${dir_name}/*")
             exclusions+=("-o" "-path" "./${dir_name}")
         # Handle simple patterns
         else
