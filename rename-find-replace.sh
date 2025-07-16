@@ -46,6 +46,9 @@ read_ignore_files() {
         fi
     done
     
+    # Automatically add .renamerignore to patterns to prevent it from being modified
+    patterns+=(".renamerignore")
+    
     # Output format: "patterns|files_found"
     printf "%s|%s" "${patterns[*]}" "${files_found[*]}"
 }
