@@ -246,6 +246,9 @@ NEGATION_CONDITIONS=()
 reading_negations=false
 
 while IFS= read -r line; do
+    # Skip empty lines
+    [[ -n "$line" ]] || continue
+    
     if [[ "$line" == "NEGATION_SEPARATOR" ]]; then
         reading_negations=true
     elif [[ "$reading_negations" == true ]]; then
@@ -283,36 +286,59 @@ else
 fi
 echo
 
+# Helper function to safely get limited results without SIGPIPE
+get_limited_matches() {
+    local limit="$1"
+    local type="$2"
+    local pattern="$3"
+    local counter=0
+    
+    if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
+        # No exclusions at all - simple find
+        if [[ "$type" == "content" ]]; then
+            find . -type f -name "*" -exec grep -l "$pattern" {} \; 2>/dev/null | while read line; do
+                echo "$line"
+                ((counter++))
+                [[ $counter -ge $limit ]] && break
+            done
+        else
+            find . -type "$type" -name "*$pattern*" | head -n "$limit"
+        fi
+    elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+        # With negation conditions: (exclusions) OR (negations)  
+        if [[ "$type" == "content" ]]; then
+            find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -exec grep -l "$pattern" {} \; 2>/dev/null | while read line; do
+                echo "$line"
+                ((counter++))
+                [[ $counter -ge $limit ]] && break
+            done
+        else
+            find . -type "$type" \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$pattern*" | head -n "$limit"
+        fi
+    else
+        # Without negation conditions: just exclusions
+        if [[ "$type" == "content" ]]; then
+            find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$pattern" {} \; 2>/dev/null | while read line; do
+                echo "$line"
+                ((counter++))
+                [[ $counter -ge $limit ]] && break
+            done
+        else
+            find . -type "$type" "${FIND_EXCLUSIONS[@]}" -name "*$pattern*" | head -n "$limit"
+        fi
+    fi
+}
+
 # Preview matches
 echo -e "\e[33mSample matching file names:\e[0m"
-if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
-    # With negation conditions: (exclusions) OR (negations)
-    find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | head -n 5
-else
-    # Without negation conditions: just exclusions
-    find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | head -n 5
-fi
+get_limited_matches 5 "f" "$FIND"
 
 echo -e "\n\e[33mSample matching folder names:\e[0m"
-if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
-    # With negation conditions: (exclusions) OR (negations)
-    find . -type d \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | head -n 5
-else
-    # Without negation conditions: just exclusions
-    find . -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND*" | head -n 5
-fi
-
+get_limited_matches 5 "d" "$FIND"
 
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     echo -e "\n\e[33mSample file content matches:\e[0m"
-    # Use find to get files that don't match ignore patterns, then grep those
-    if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
-        # With negation conditions: (exclusions) OR (negations)
-        find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -exec grep -l "$FIND" {} \; | head -n 5
-    else
-        # Without negation conditions: just exclusions
-        find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$FIND" {} \; | head -n 5
-    fi
+    get_limited_matches 5 "content" "$FIND"
 else
     echo -e "\n\e[33mSkipping file content preview (--skip-contents)\e[0m"
 fi
@@ -325,12 +351,15 @@ read -p "Proceed with find-and-replace? [y/N] " confirm
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     echo -e "\n\e[32mReplacing contents...\e[0m"
     # Replace in file contents, respecting ignore patterns
-    if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+    if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
+        # No exclusions at all - simple find
+        find . -type f -name "*" -exec grep -l "$FIND" {} \; 2>/dev/null | xargs -r sed -i "s/$FIND/$REPLACE/g"
+    elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
         # With negation conditions: (exclusions) OR (negations)
-        find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -exec grep -l "$FIND" {} \; | xargs -r sed -i "s/$FIND/$REPLACE/g"
+        find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -exec grep -l "$FIND" {} \; 2>/dev/null | xargs -r sed -i "s/$FIND/$REPLACE/g"
     else
         # Without negation conditions: just exclusions
-        find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$FIND" {} \; | xargs -r sed -i "s/$FIND/$REPLACE/g"
+        find . -type f "${FIND_EXCLUSIONS[@]}" -exec grep -l "$FIND" {} \; 2>/dev/null | xargs -r sed -i "s/$FIND/$REPLACE/g"
     fi
 else
     echo -e "\n\e[32mSkipping file content replacement (--skip-contents)\e[0m"
@@ -338,7 +367,15 @@ fi
 
 echo -e "\n\e[32mRenaming directories...\e[0m"
 # Rename directories first (depth-first to avoid path issues)
-if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
+    # No exclusions at all - simple find
+    find . -depth -type d -name "*$FIND*" | while read dir; do
+        newdir="${dir//$FIND/$REPLACE}"
+        if [[ "$dir" != "$newdir" && ! -e "$newdir" ]]; then
+            mv "$dir" "$newdir"
+        fi
+    done
+elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
     # With negation conditions: (exclusions) OR (negations)
     find . -depth -type d \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | while read dir; do
         newdir="${dir//$FIND/$REPLACE}"
@@ -358,7 +395,15 @@ fi
 
 echo -e "\n\e[32mRenaming files...\e[0m"
 # Rename files after folders are renamed
-if [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
+if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
+    # No exclusions at all - simple find
+    find . -type f -name "*$FIND*" | while read file; do
+        newfile="${file//$FIND/$REPLACE}"
+        if [[ "$file" != "$newfile" && ! -e "$newfile" ]]; then
+            mv "$file" "$newfile"
+        fi
+    done
+elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
     # With negation conditions: (exclusions) OR (negations)
     find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*" | while read file; do
         newfile="${file//$FIND/$REPLACE}"
