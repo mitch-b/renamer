@@ -3,7 +3,13 @@
 # Test script to verify that nested exclusions work correctly
 # This test ensures files and folders in ignored directories are properly excluded
 
-set -e
+set -euo pipefail
+
+# Resolve repo root (directory containing this script)/..
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cd "$REPO_ROOT"
 
 echo "🧪 Testing nested exclusions..."
 
@@ -30,7 +36,7 @@ cd "$TEST_DIR"
 
 # Test the script and capture output
 echo "Running renamer script..."
-output=$(echo "n" | bash ../rename-find-replace.sh test replaced 2>&1)
+output=$(echo "n" | bash "$REPO_ROOT/rename-find-replace.sh" test replaced 2>&1)
 
 echo "Script output:"
 echo "$output"
@@ -68,7 +74,7 @@ fi
 echo "✅ All tests passed! Nested exclusions work correctly."
 
 # Cleanup
-cd ..
+cd "$REPO_ROOT"
 rm -rf "$TEST_DIR"
 
 echo "🎉 Test completed successfully"
