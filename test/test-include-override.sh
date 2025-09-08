@@ -11,12 +11,12 @@ echo 'foo value' > "$TEST_DIR/ignoredir/file.txt"
 echo 'ignoredir/' > "$TEST_DIR/.renamerignore"
 
 pushd "$TEST_DIR" >/dev/null
-# First run without include: ensure content not matched
-OUT1=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar -n 2>&1 || true)
+# First run without include: ensure content not matched (abort)
+OUT1=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar 2>&1 <<<"n" || true)
 grep -q 'file.txt' <<<"$OUT1" && { echo "File should be ignored but appeared without include"; exit 1; }
 
-# Run with include override
-OUT2=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar -n --include ignoredir/ 2>&1 || true)
+# Run with include override (abort)
+OUT2=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar --include ignoredir/ 2>&1 <<<"n" || true)
 grep -q 'file.txt' <<<"$OUT2" || { echo "File did not appear with --include override"; exit 1; }
 popd >/dev/null
 

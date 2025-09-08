@@ -199,65 +199,50 @@ build_find_exclusions() {
     fi
 }
 
-# Parse arguments: positional for find/replace, optional flags
+#############################
+# ARGUMENT PARSING
+#############################
 SKIP_CONTENTS=0
-DRY_RUN=0
 PROCESS_BINARY=0  # 0 = skip binary (default), 1 = include
 IGNORE_PATTERNS=()
 INCLUDE_PATTERNS=()
+DEPRECATED_DRY_RUN=0
+FORCE_APPLY=0
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --dry-run|--dryrun|-n)
-            DRY_RUN=1
-            shift
-            ;;
         --skip-contents)
-            SKIP_CONTENTS=1
-            shift
-            ;;
+            SKIP_CONTENTS=1; shift ;;
         --include-binary|--no-skip-binary)
-            PROCESS_BINARY=1
-            shift
-            ;;
+            PROCESS_BINARY=1; shift ;;
+        --force)
+            FORCE_APPLY=1; shift ;;
         --ignore)
             if [[ -n "$2" && "$2" != --* ]]; then
-                # Support comma-separated patterns
                 IFS=',' read -ra PATTERNS <<< "$2"
                 for pattern in "${PATTERNS[@]}"; do
-                    # Trim whitespace
                     pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                    if [[ -n "$pattern" ]]; then
-                        IGNORE_PATTERNS+=("$pattern")
-                    fi
+                    [[ -n "$pattern" ]] && IGNORE_PATTERNS+=("$pattern")
                 done
                 shift 2
             else
-                echo "Error: --ignore requires a pattern argument"
-                exit 1
-            fi
-            ;;
+                echo "Error: --ignore requires a pattern argument"; exit 1
+            fi ;;
         --include)
             if [[ -n "$2" && "$2" != --* ]]; then
-                # Support comma-separated patterns
                 IFS=',' read -ra PATTERNS <<< "$2"
                 for pattern in "${PATTERNS[@]}"; do
-                    # Trim whitespace
                     pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                    if [[ -n "$pattern" ]]; then
-                        INCLUDE_PATTERNS+=("$pattern")
-                    fi
+                    [[ -n "$pattern" ]] && INCLUDE_PATTERNS+=("$pattern")
                 done
                 shift 2
             else
-                echo "Error: --include requires a pattern argument"
-                exit 1
-            fi
-            ;;
-        *)
-            POSITIONAL+=("$1")
-            shift
-            ;;
+                echo "Error: --include requires a pattern argument"; exit 1
+            fi ;;
+        --dry-run|--dryrun|-n)
+            # Deprecated: keep tolerant for old usage; treat as "show plan then ask"
+            DEPRECATED_DRY_RUN=1; shift ;;
+        *) POSITIONAL+=("$1"); shift ;;
     esac
 done
 set -- "${POSITIONAL[@]}"
@@ -268,11 +253,14 @@ if [[ $# -lt 2 ]]; then
     echo "Usage: docker run --rm -it -v \"\$PWD:/data\" ghcr.io/mitch-b/renamer <find> <replace> [options...]"
     echo ""
     echo "Options:"
-    echo "  -n, --dry-run         Show ALL planned changes (no modifications)"
     echo "  --skip-contents       Skip replacing text inside files"
     echo "  --include-binary      Process binary files (off by default)"
     echo "  --ignore <pattern>    Ignore patterns (comma-separated or multiple flags)"
     echo "  --include <pattern>   Force include patterns (overrides ignores)"
+    echo "  --force               Apply without interactive confirmation"
+    echo ""
+    echo "The script now always shows a full plan and asks for confirmation." 
+    echo "Use 'y' to apply, anything else to abort. (-n / --dry-run is deprecated.)"
     echo ""
     echo "Examples:"
     echo "  docker run --rm -it -v \"\$PWD:/data\" ghcr.io/mitch-b/renamer oldText newText"
@@ -332,8 +320,16 @@ print_header
 
 log_info "Current directory: $(pwd)"
 log_info "Find: '${BOLD}$FIND${RESET}' ${SYM_RIGHT} Replace: '${BOLD}$REPLACE${RESET}'"
-if [[ $DRY_RUN -eq 1 ]]; then
-    log_warn "Dry run mode: NO changes will be made"
+if [[ $DEPRECATED_DRY_RUN -eq 1 ]]; then
+    if [[ $FORCE_APPLY -eq 1 ]]; then
+        log_warn "--dry-run (deprecated) and --force both supplied; --dry-run takes precedence (no changes)."
+        FORCE_APPLY=0
+    else
+        log_warn "Dry-run flag is deprecated. Showing plan; confirmation now controls execution."
+    fi
+fi
+if [[ $FORCE_APPLY -eq 1 ]]; then
+    log_warn "--force supplied: will apply changes without interactive confirmation."
 fi
 
 # Show ignore patterns with sources
@@ -402,9 +398,10 @@ get_limited_matches() {
 }
 
 # Preview matches
-log_section "Sample matching file names"
+# (Legacy short sample removed) We'll build a full plan later.
+log_section "Initial scan (quick sample of file names containing pattern)"
 get_limited_matches 5 "f" "$FIND"
-log_dim "Proceed with (non-interactive run)"
+log_dim "Full plan with ALL matches will be shown below before confirmation."
 
 ##############
 # PROGRESS HELPERS
@@ -426,7 +423,9 @@ CONTENT_REPLACED_COUNT=0
 DIR_RENAMED_COUNT=0
 FILE_RENAMED_COUNT=0
 
-# Content scan & replace
+#############################
+# SCAN ONLY (build plan)
+#############################
 MATCH_CONTENT_FILES=()
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     log_step "Scanning for content matches"
@@ -439,30 +438,8 @@ if [[ $SKIP_CONTENTS -eq 0 ]]; then
         while IFS= read -r f; do MATCH_CONTENT_FILES+=("$f"); progress_bar ${#MATCH_CONTENT_FILES[@]} 0 "Collect"; done < <(find . -type f "${FIND_EXCLUSIONS[@]}" -exec "${GREP_CONTENT[@]}" {} \; 2>/dev/null)
     fi
     finish_progress
-    # Show a sample of content match files (first 5) to satisfy tests expecting preview
-    if [[ ${#MATCH_CONTENT_FILES[@]} -gt 0 ]]; then
-        log_section "Sample file content matches"
-        limit=10; count=0
-        for f in "${MATCH_CONTENT_FILES[@]}"; do
-            log_raw "$f"
-            ((count++)); [[ $count -ge $limit ]] && break
-        done
-    fi
-    if [[ $DRY_RUN -eq 1 ]]; then
-        DRY_CONTENT_FILES=("${MATCH_CONTENT_FILES[@]}")
-    else
-        if (( ${#MATCH_CONTENT_FILES[@]} > 0 )); then
-            log_step "Replacing contents"
-            total=${#MATCH_CONTENT_FILES[@]}; idx=0
-            for f in "${MATCH_CONTENT_FILES[@]}"; do
-                sed -i "s/$FIND/$REPLACE/g" "$f" && ((CONTENT_REPLACED_COUNT++))
-                ((idx++)); progress_bar "$idx" "$total" "Content"
-            done
-            finish_progress
-        fi
-    fi
 else
-    log_warn "Skipping file content replacement (--skip-contents)"
+    log_warn "Skipping file content scan (--skip-contents)"
 fi
 
 # Directory rename candidates
@@ -476,16 +453,7 @@ else
     while IFS= read -r dir; do newdir="${dir//$FIND/$REPLACE}"; [[ "$dir" == "$newdir" ]] && continue; DIR_CANDIDATES+=("$dir"); progress_bar ${#DIR_CANDIDATES[@]} 0 "Dirs"; done < <(find . -depth -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND*")
 fi
 finish_progress
-if [[ $DRY_RUN -eq 1 ]]; then
-    for d in "${DIR_CANDIDATES[@]}"; do DRY_DIRS+=("$d -> ${d//$FIND/$REPLACE}"); done
-else
-    if (( ${#DIR_CANDIDATES[@]} > 0 )); then
-        log_step "Renaming directories"
-        total=${#DIR_CANDIDATES[@]}; idx=0
-        for dir in "${DIR_CANDIDATES[@]}"; do newdir="${dir//$FIND/$REPLACE}"; if [[ ! -e "$newdir" ]]; then mv "$dir" "$newdir" && ((DIR_RENAMED_COUNT++)); fi; ((idx++)); progress_bar "$idx" "$total" "Dirs"; done
-        finish_progress
-    fi
-fi
+# (Renames deferred until confirmation)
 
 # File rename candidates
 FILE_CANDIDATES=()
@@ -498,23 +466,103 @@ else
     while IFS= read -r file; do newfile="${file//$FIND/$REPLACE}"; [[ "$file" == "$newfile" ]] && continue; FILE_CANDIDATES+=("$file"); progress_bar ${#FILE_CANDIDATES[@]} 0 "Files"; done < <(find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND*")
 fi
 finish_progress
-if [[ $DRY_RUN -eq 1 ]]; then
-    for f in "${FILE_CANDIDATES[@]}"; do DRY_FILES+=("$f -> ${f//$FIND/$REPLACE}"); done
+# (Renames deferred until confirmation)
+
+#############################
+# PLAN OUTPUT & CONFIRMATION
+#############################
+echo
+log_section "Planned changes (full)"
+if [[ $SKIP_CONTENTS -eq 0 ]]; then
+    if (( ${#MATCH_CONTENT_FILES[@]} > 0 )); then
+        log_info "Files with matching content: ${#MATCH_CONTENT_FILES[@]}"
+        for f in "${MATCH_CONTENT_FILES[@]}"; do log_raw "  $f"; done
+    else
+        log_dim "  (No file contents contain '$FIND')"
+    fi
 else
-    if (( ${#FILE_CANDIDATES[@]} > 0 )); then
-        log_step "Renaming files"
-        total=${#FILE_CANDIDATES[@]}; idx=0
-        for file in "${FILE_CANDIDATES[@]}"; do
-            newfile="${file//$FIND/$REPLACE}"
-            if [[ ! -e "$newfile" ]]; then
-                mv "$file" "$newfile" && ((FILE_RENAMED_COUNT++))
-                RENAMED_FILES+=("$file -> $newfile")
-            fi
-            ((idx++)); progress_bar "$idx" "$total" "Files"
-        done
-        finish_progress
+    log_dim "  (Content scanning skipped)"
+fi
+
+if (( ${#DIR_CANDIDATES[@]} > 0 )); then
+    log_info "Directory renames: ${#DIR_CANDIDATES[@]}"
+    for d in "${DIR_CANDIDATES[@]}"; do log_raw "  $d -> ${d//$FIND/$REPLACE}"; done
+else
+    log_dim "  (No directories to rename)"
+fi
+
+if (( ${#FILE_CANDIDATES[@]} > 0 )); then
+    log_info "File renames: ${#FILE_CANDIDATES[@]}"
+    for f in "${FILE_CANDIDATES[@]}"; do log_raw "  $f -> ${f//$FIND/$REPLACE}"; done
+else
+    log_dim "  (No files to rename)"
+fi
+
+echo
+READ_INPUT=1
+if [[ -n "$CI" || ! -t 0 ]]; then
+    # Non-interactive environment: if deprecated dry-run flag was passed, auto-abort; else require explicit yes via RENAMER_AUTO_YES
+    if [[ $DEPRECATED_DRY_RUN -eq 1 ]]; then
+        USER_RESPONSE="n"; READ_INPUT=0
+    elif [[ "${RENAMER_AUTO_YES:-}" == "1" ]]; then
+        USER_RESPONSE="y"; READ_INPUT=0
     fi
 fi
+
+# Deprecated dry-run flag always implies preview-only with no prompt
+if [[ $DEPRECATED_DRY_RUN -eq 1 ]]; then
+    USER_RESPONSE="n"; READ_INPUT=0
+elif [[ $FORCE_APPLY -eq 1 ]]; then
+    USER_RESPONSE="y"; READ_INPUT=0
+fi
+
+if [[ $READ_INPUT -eq 1 ]]; then
+    printf "%b" "Apply these changes? (y/N): " >&2
+    read -r USER_RESPONSE || USER_RESPONSE=""
+fi
+
+case "$USER_RESPONSE" in
+    y|Y|yes|YES)
+        log_step "Applying changes"
+        # Content replacements
+        if [[ $SKIP_CONTENTS -eq 0 && ${#MATCH_CONTENT_FILES[@]} -gt 0 ]]; then
+            total=${#MATCH_CONTENT_FILES[@]}; idx=0
+            for f in "${MATCH_CONTENT_FILES[@]}"; do
+                sed -i "s/$FIND/$REPLACE/g" "$f" && ((CONTENT_REPLACED_COUNT++))
+                ((idx++)); progress_bar "$idx" "$total" "Content"
+            done
+            finish_progress
+        fi
+        # Directory renames (depth order already from -depth find results; keep order)
+        if (( ${#DIR_CANDIDATES[@]} > 0 )); then
+            total=${#DIR_CANDIDATES[@]}; idx=0
+            for dir in "${DIR_CANDIDATES[@]}"; do
+                newdir="${dir//$FIND/$REPLACE}"
+                if [[ ! -e "$newdir" ]]; then
+                    mv "$dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                fi
+                ((idx++)); progress_bar "$idx" "$total" "Dirs"
+            done
+            finish_progress
+        fi
+        # File renames
+        if (( ${#FILE_CANDIDATES[@]} > 0 )); then
+            total=${#FILE_CANDIDATES[@]}; idx=0
+            for file in "${FILE_CANDIDATES[@]}"; do
+                newfile="${file//$FIND/$REPLACE}"
+                if [[ ! -e "$newfile" ]]; then
+                    mv "$file" "$newfile" && ((FILE_RENAMED_COUNT++))
+                    RENAMED_FILES+=("$file -> $newfile")
+                fi
+                ((idx++)); progress_bar "$idx" "$total" "Files"
+            done
+            finish_progress
+        fi
+        APPLY_EXECUTED=1
+        ;;
+    *)
+        log_warn "Aborted by user. No changes applied."; APPLY_EXECUTED=0 ;;
+esac
 
 echo
 log_section "Summary"
@@ -528,56 +576,28 @@ print_metrics_table() {
 ELAPSED=$(( SECONDS - SCRIPT_START ))
 if (( ELAPSED < 1 )); then ELAPSED=1; fi
 
-if [[ $DRY_RUN -eq 1 ]]; then
-    total_candidate_content=${#DRY_CONTENT_FILES[@]}
-    total_candidate_dirs=${#DRY_DIRS[@]}
-    total_candidate_files=${#DRY_FILES[@]}
-else
-    total_candidate_content=${#MATCH_CONTENT_FILES[@]}
-    total_candidate_dirs=${#DIR_CANDIDATES[@]}
-    total_candidate_files=${#FILE_CANDIDATES[@]}
-fi
+total_candidate_content=${#MATCH_CONTENT_FILES[@]}
+total_candidate_dirs=${#DIR_CANDIDATES[@]}
+total_candidate_files=${#FILE_CANDIDATES[@]}
 
 # Print a table
 if supports_tty; then
     printf "%b\n" "${FG_GREY}-----------------------------------------------${RESET}"
     printf "%-28s %10s\n" "Metric" "Value"
     printf "%-28s %10s\n" "----------------------------" "----------"
-    if [[ $DRY_RUN -eq 1 ]]; then
-        [[ $SKIP_CONTENTS -eq 0 ]] && printf "%-28s %10d\n" "Content match candidates" "$total_candidate_content"
-        printf "%-28s %10d\n" "Dir rename candidates" "$total_candidate_dirs"
-        printf "%-28s %10d\n" "File rename candidates" "$total_candidate_files"
-    else
+    if [[ ${APPLY_EXECUTED:-0} -eq 1 ]]; then
         [[ $SKIP_CONTENTS -eq 0 ]] && printf "%-28s %10d\n" "Files with content replaced" "$CONTENT_REPLACED_COUNT"
         printf "%-28s %10d\n" "Directories renamed" "$DIR_RENAMED_COUNT"
         printf "%-28s %10d\n" "Files renamed" "$FILE_RENAMED_COUNT"
+    else
+        [[ $SKIP_CONTENTS -eq 0 ]] && printf "%-28s %10d\n" "Content match candidates" "$total_candidate_content"
+        printf "%-28s %10d\n" "Dir rename candidates" "$total_candidate_dirs"
+        printf "%-28s %10d\n" "File rename candidates" "$total_candidate_files"
     fi
     printf "%-28s %10ds\n" "Elapsed" "$ELAPSED"
     printf "%b\n" "${FG_GREY}-----------------------------------------------${RESET}"
 fi
-if [[ $DRY_RUN -eq 1 ]]; then
-    if [[ $SKIP_CONTENTS -eq 0 ]]; then
-        log_info "Content replacement candidates: ${#DRY_CONTENT_FILES[@]}"
-    else
-        log_dim "(Content scanning skipped)"
-    fi
-    log_info "Directory rename candidates: ${#DRY_DIRS[@]}"
-    log_info "File rename candidates:     ${#DRY_FILES[@]}"
-
-    if [[ $SKIP_CONTENTS -eq 0 && ${#DRY_CONTENT_FILES[@]} -gt 0 ]]; then
-        log_section "Files with matching content"
-        for f in "${DRY_CONTENT_FILES[@]}"; do log_raw "  $f"; done
-    fi
-    if [[ ${#DRY_DIRS[@]} -gt 0 ]]; then
-        log_section "Directory rename plan"
-        for d in "${DRY_DIRS[@]}"; do log_raw "  $d"; done
-    fi
-    if [[ ${#DRY_FILES[@]} -gt 0 ]]; then
-        log_section "File rename plan"
-        for f in "${DRY_FILES[@]}"; do log_raw "  $f"; done
-    fi
-    log_success "Dry run complete"
-else
+if [[ ${APPLY_EXECUTED:-0} -eq 1 ]]; then
     if [[ $SKIP_CONTENTS -eq 0 ]]; then
         log_info "Files with content replaced: ${CONTENT_REPLACED_COUNT}"
     else
@@ -585,17 +605,17 @@ else
     fi
     log_info "Directories renamed: ${DIR_RENAMED_COUNT}"
     log_info "Files renamed:       ${FILE_RENAMED_COUNT}"
-
     if (( FILE_RENAMED_COUNT > 0 )); then
         log_section "Files renamed"
         for entry in "${RENAMED_FILES[@]}"; do log_raw "  $entry"; done
     fi
-
     if (( DIR_RENAMED_COUNT + FILE_RENAMED_COUNT + CONTENT_REPLACED_COUNT > 0 )); then
         log_success "Done"
     else
         log_warn "No changes applied"
     fi
+else
+    log_info "(Preview only; user aborted or non-interactive plan)"
 fi
 
 # (Match density section removed per user request)

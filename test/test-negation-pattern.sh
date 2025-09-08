@@ -15,7 +15,7 @@ dist/
 EOF
 
 pushd "$TEST_DIR" >/dev/null
-OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" target replaced -n 2>&1 || true)
+OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" target replaced 2>&1 <<<"n" || true)
 popd >/dev/null
 
 # keep.txt should appear, omit.txt should not

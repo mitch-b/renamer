@@ -40,7 +40,7 @@ cd "$TEST_DIR"
 
 # Test the script and capture output
 echo "Running renamer script..."
-output=$(echo "n" | bash "$REPO_ROOT/rename-find-replace.sh" rename errr 2>&1)
+output=$(bash "$REPO_ROOT/rename-find-replace.sh" rename errr 2>&1 <<<"n")
 
 echo "Script output:"
 echo "$output"

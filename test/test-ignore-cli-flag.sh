@@ -11,7 +11,8 @@ echo 'foo zzz' > "$TEST_DIR/a/file-foo.txt"
 echo 'foo yyy' > "$TEST_DIR/b/file-foo.txt"
 
 pushd "$TEST_DIR" >/dev/null
-OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar -n --ignore a/ 2>&1 || true)
+# Provide 'n' to abort after plan so files are not changed
+OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar --ignore a/ 2>&1 <<<"n" || true)
 popd >/dev/null
 
 grep -q 'b/file-foo.txt' <<<"$OUT" || { echo "Expected file in b/ missing"; exit 1; }

@@ -10,7 +10,7 @@ rm -rf "$TEST_DIR" && mkdir -p "$TEST_DIR"
 echo 'alpha bravo charlie' > "$TEST_DIR/original.txt"
 
 pushd "$TEST_DIR" >/dev/null
-OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" alpha beta --skip-contents <<<"y" 2>&1 || true)
+OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" alpha beta --skip-contents 2>&1 <<<"y" || true)
 popd >/dev/null
 
 grep -q 'alpha bravo' "$TEST_DIR/original.txt" || { echo "Content changed despite --skip-contents"; exit 1; }

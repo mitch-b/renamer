@@ -16,8 +16,11 @@ docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
 ## Core Usage & Options
 
 ```bash
-# Dry run (plan only – shows content matches & rename plan, no changes)
-docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --dry-run
+# (Always shows a full plan first, then prompts to apply)
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText
+
+# Force apply without prompt:
+docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --force
 
 # Skip file contents (only rename files & folders)
 docker run --rm -it -v "$PWD:/data" ghcr.io/mitch-b/renamer oldText newText --skip-contents
@@ -71,7 +74,7 @@ Supports **gitignore-style patterns**:
 
 | Flag | Shorthand | Description |
 |------|-----------|-------------|
-| `--dry-run` | `-n` | Plan only: show content match candidates & rename plan without modifying anything |
+| `--force` | — | Apply changes without interactive confirmation (non-interactive automation) |
 | `--skip-contents` | — | Skip in-file text replacement (only rename file/dir names) |
 | `--ignore <pat>` | — | Add ignore patterns (comma separated or repeat flag) |
 | `--include <pat>` | — | Force include pattern (overrides ignore rules) |
@@ -91,7 +94,6 @@ The script internally translates gitignore-style patterns into `find` expression
 | Feature | Description |
 |---------|-------------|
 | Concise colored output | Automatically adapts to your terminal (falls back gracefully when piped) |
-| Dry run planner | Shows: sample file-name matches, sample content match files, directory/file rename plan, and counts |
 | Progress bars | Lightweight progress display for content scanning, directory scanning, file scanning, and rename phases (TTY only) |
 | Safe binary default | Binary files ignored unless `--include-binary` supplied |
 | Ignore introspection | Lists active ignore sources & files that contributed patterns |
@@ -99,40 +101,43 @@ The script internally translates gitignore-style patterns into `find` expression
 | Rename plan clarity | In dry run, shows `old -> new` for every planned rename |
 | Actual rename list | On real run, lists executed file renames (directories & files) |
 
-### Example Dry Run (abridged)
+### Example Run (plan then apply)
 
 ```
 Renamer • Find & Replace Utility
 Find: 'old' → Replace: 'new'
-Dry run mode: NO changes will be made
+--force supplied: will apply changes without interactive confirmation.
 
-Sample matching file names
+Initial scan (quick sample of file names containing pattern)
 ./src/old-module.js
-./test/old-test.spec.js
 ...
 
-Sample file content matches
-./src/feature/useOldThing.ts
-./README.md
-...
-
-Directory rename plan
+Planned changes (full)
+Files with matching content: 12
+    ./src/feature/useOldThing.ts
+    ./README.md
+    ...
+Directory renames: 1
     ./src/old_lib -> ./src/new_lib
-
-File rename plan
+File renames: 7
     ./src/old-module.js -> ./src/new-module.js
     ./test/old-test.spec.js -> ./test/new-test.spec.js
 
+Applying changes (progress bars...)
+
 Summary
-    Content replacement candidates: 12
-    Directory rename candidates:    1
-    File rename candidates:         7
-    Dry run complete
+    Files with content replaced: 12
+    Directories renamed: 1
+    Files renamed:       7
+    Done
 ```
 
 ## Behavior Notes
 
 * Output is readable whether run interactively or piped to a log file.
+* The script always performs a full scan and prints the entire plan before asking for confirmation.
+* Use `--force` for CI / automation (or set `RENAMER_AUTO_YES=1` env var) to skip the prompt.
+* Legacy `--dry-run` / `-n` now maps to "plan only" and is deprecated; it prints the plan and exits without prompting.
 * Replacements use `sed -i 's/find/replace/g'`; regex metacharacters in the find string are treated as regex (literal-mode flag planned).
 * Binary files are skipped by default; `--include-binary` opts in.
 * Content replacement happens before file & directory renames for stability.

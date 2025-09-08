@@ -11,7 +11,7 @@ echo 'foo body foo' > "$TEST_DIR/foo-file.txt"
 echo 'nothing' > "$TEST_DIR/other.txt"
 
 pushd "$TEST_DIR" >/dev/null
-OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar <<<"y" 2>&1 || true)
+OUT=$(NO_COLOR=1 bash "$REPO_ROOT/rename-find-replace.sh" foo bar 2>&1 <<<"y" || true)
 popd >/dev/null
 
 [[ -f "$TEST_DIR/bar-file.txt" ]] || { echo "Renamed file not found"; echo "$OUT"; exit 1; }
