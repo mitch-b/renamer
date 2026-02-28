@@ -413,7 +413,7 @@ progress_bar() {
     local percent=0
     if (( total > 0 )); then percent=$(( current * 100 / total )); fi
     local filled=$(( total>0 ? (width * current / total) : 0 ))
-    local bar=""; for ((i=0;i<filled;i++)); do bar+="#"; done; for ((i=filled;i<width;i++)); do bar+="-"; done
+    local bar=""; local i; for ((i=0;i<filled;i++)); do bar+="#"; done; for ((i=filled;i<width;i++)); do bar+="-"; done
     if supports_tty; then printf "\r%s [%s] %3d%% (%d/%d)" "$label" "$bar" "$percent" "$current" "${total:-0}"; fi
 }
 finish_progress() { supports_tty && printf "\n"; }
@@ -533,13 +533,22 @@ case "$USER_RESPONSE" in
             done
             finish_progress
         fi
-        # Directory renames (depth order already from -depth find results; keep order)
+        # Directory renames (process shallowest dirs first so parent dirs are renamed before their children)
         if (( ${#DIR_CANDIDATES[@]} > 0 )); then
             total=${#DIR_CANDIDATES[@]}; idx=0
-            for dir in "${DIR_CANDIDATES[@]}"; do
+            for (( dir_idx=${#DIR_CANDIDATES[@]}-1; dir_idx>=0; dir_idx-- )); do
+                dir="${DIR_CANDIDATES[$dir_idx]}"
                 newdir="${dir//$FIND/$REPLACE}"
                 if [[ ! -e "$newdir" ]]; then
-                    mv "$dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                    if [[ -e "$dir" ]]; then
+                        mv "$dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                    else
+                        # Parent dir was already renamed; reconstruct path using new parent + old basename
+                        current_dir="$(dirname "$newdir")/$(basename "$dir")"
+                        if [[ -e "$current_dir" ]]; then
+                            mv "$current_dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                        fi
+                    fi
                 fi
                 ((idx++)); progress_bar "$idx" "$total" "Dirs"
             done
@@ -551,8 +560,17 @@ case "$USER_RESPONSE" in
             for file in "${FILE_CANDIDATES[@]}"; do
                 newfile="${file//$FIND/$REPLACE}"
                 if [[ ! -e "$newfile" ]]; then
-                    mv "$file" "$newfile" && ((FILE_RENAMED_COUNT++))
-                    RENAMED_FILES+=("$file -> $newfile")
+                    if [[ -e "$file" ]]; then
+                        mv "$file" "$newfile" && ((FILE_RENAMED_COUNT++))
+                        RENAMED_FILES+=("$file -> $newfile")
+                    else
+                        # Directory was already renamed; reconstruct path using new dir + old basename
+                        current_file="$(dirname "$newfile")/$(basename "$file")"
+                        if [[ -e "$current_file" ]]; then
+                            mv "$current_file" "$newfile" && ((FILE_RENAMED_COUNT++))
+                            RENAMED_FILES+=("$file -> $newfile")
+                        fi
+                    fi
                 fi
                 ((idx++)); progress_bar "$idx" "$total" "Files"
             done
