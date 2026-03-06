@@ -22,12 +22,15 @@ for test_file in "$SCRIPT_DIR"/test-*.sh; do
   fi
   ((TOTAL++))
   echo "--- $base ---"
+  t_start=$SECONDS
   bash "$test_file" >"$SCRIPT_DIR/_out_${base}.log" 2>&1
   status=$?
+  t_elapsed=$(( SECONDS - t_start ))
   if [[ $status -eq 0 ]]; then
-    echo "PASS: $base"
+    echo "PASS: $base  (${t_elapsed}s)"
+    rm -f "$SCRIPT_DIR/_out_${base}.log"
   else
-    echo "FAIL: $base" >&2
+    echo "FAIL: $base  (${t_elapsed}s)" >&2
     echo "---- BEGIN OUTPUT ($base) ----" >&2
     sed 's/^/| /' "$SCRIPT_DIR/_out_${base}.log" >&2 || true
     echo "---- END OUTPUT ($base) ----" >&2
@@ -39,6 +42,7 @@ set -e
 
 echo "Total: $TOTAL  Failed: $FAILS"
 if (( FAILS > 0 )); then
+  echo "Log files for failed tests saved to test/_out_*.log"
   exit 1
 fi
 echo "All tests passed."
