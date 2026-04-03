@@ -271,6 +271,14 @@ fi
 FIND="$1"
 REPLACE="$2"
 
+# Escape FIND and REPLACE for safe interpolation into sed substitution expressions.
+# Without escaping, user-supplied values containing '/' or sed flags (e.g. /e) allow
+# arbitrary shell-command execution via GNU sed's 'e' flag (CVE-class: command injection).
+#   FIND_SED  : escaped for use as a BRE pattern (delimiter + regex metacharacters)
+#   REPLACE_SED: escaped for use as a replacement string (delimiter, & and \)
+FIND_SED=$(printf '%s\n' "$FIND" | sed 's/[[\.*^$()+?{|]/\\&/g; s|/|\\/|g')
+REPLACE_SED=$(printf '%s\n' "$REPLACE" | sed 's/[&\]/\\&/g; s|/|\\/|g')
+
 # Read patterns from .renamerignore files
 ignore_file_result=$(read_ignore_files)
 IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
@@ -362,10 +370,10 @@ get_limited_matches() {
     local pattern="$3"
     local counter=0
     
-    local GREP_CMD=(grep -l "$pattern")
+    local GREP_CMD=(grep -Fl "$pattern")
     # Use -I to ignore binary matches when skipping binary
     if [[ $PROCESS_BINARY -eq 0 ]]; then
-        GREP_CMD=(grep -Il "$pattern")
+        GREP_CMD=(grep -IFl "$pattern")
     fi
     if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
         # No exclusions at all
@@ -429,7 +437,7 @@ FILE_RENAMED_COUNT=0
 MATCH_CONTENT_FILES=()
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     log_step "Scanning for content matches"
-    GREP_CONTENT=(grep -l "$FIND"); [[ $PROCESS_BINARY -eq 0 ]] && GREP_CONTENT=(grep -Il "$FIND")
+    GREP_CONTENT=(grep -Fl "$FIND"); [[ $PROCESS_BINARY -eq 0 ]] && GREP_CONTENT=(grep -IFl "$FIND")
     if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
         while IFS= read -r f; do MATCH_CONTENT_FILES+=("$f"); progress_bar ${#MATCH_CONTENT_FILES[@]} 0 "Collect"; done < <(find . -type f -exec "${GREP_CONTENT[@]}" {} \; 2>/dev/null)
     elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
@@ -528,7 +536,7 @@ case "$USER_RESPONSE" in
         if [[ $SKIP_CONTENTS -eq 0 && ${#MATCH_CONTENT_FILES[@]} -gt 0 ]]; then
             total=${#MATCH_CONTENT_FILES[@]}; idx=0
             for f in "${MATCH_CONTENT_FILES[@]}"; do
-                sed -i "s/$FIND/$REPLACE/g" "$f" && ((CONTENT_REPLACED_COUNT++))
+                sed -i "s/$FIND_SED/$REPLACE_SED/g" "$f" && ((CONTENT_REPLACED_COUNT++))
                 ((idx++)); progress_bar "$idx" "$total" "Content"
             done
             finish_progress
