@@ -271,6 +271,14 @@ fi
 FIND="$1"
 REPLACE="$2"
 
+# Escape FIND and REPLACE for safe interpolation into sed substitution expressions.
+# Without escaping, user-supplied values containing '/' or sed flags (e.g. /e) allow
+# arbitrary shell-command execution via GNU sed's 'e' flag (CVE-class: command injection).
+#   FIND_SED  : escaped for use as a BRE pattern (delimiter + regex metacharacters)
+#   REPLACE_SED: escaped for use as a replacement string (delimiter, & and \)
+FIND_SED=$(printf '%s\n' "$FIND" | sed 's/[[\.*^$()+?{|]/\\&/g; s|/|\\/|g')
+REPLACE_SED=$(printf '%s\n' "$REPLACE" | sed 's/[&\]/\\&/g; s|/|\\/|g')
+
 # Read patterns from .renamerignore files
 ignore_file_result=$(read_ignore_files)
 IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
@@ -528,7 +536,7 @@ case "$USER_RESPONSE" in
         if [[ $SKIP_CONTENTS -eq 0 && ${#MATCH_CONTENT_FILES[@]} -gt 0 ]]; then
             total=${#MATCH_CONTENT_FILES[@]}; idx=0
             for f in "${MATCH_CONTENT_FILES[@]}"; do
-                sed -i "s/$FIND/$REPLACE/g" "$f" && ((CONTENT_REPLACED_COUNT++))
+                sed -i "s/$FIND_SED/$REPLACE_SED/g" "$f" && ((CONTENT_REPLACED_COUNT++))
                 ((idx++)); progress_bar "$idx" "$total" "Content"
             done
             finish_progress
