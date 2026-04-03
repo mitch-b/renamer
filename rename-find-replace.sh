@@ -370,10 +370,10 @@ get_limited_matches() {
     local pattern="$3"
     local counter=0
     
-    local GREP_CMD=(grep -l "$pattern")
+    local GREP_CMD=(grep -Fl "$pattern")
     # Use -I to ignore binary matches when skipping binary
     if [[ $PROCESS_BINARY -eq 0 ]]; then
-        GREP_CMD=(grep -Il "$pattern")
+        GREP_CMD=(grep -IFl "$pattern")
     fi
     if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
         # No exclusions at all
@@ -437,7 +437,7 @@ FILE_RENAMED_COUNT=0
 MATCH_CONTENT_FILES=()
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     log_step "Scanning for content matches"
-    GREP_CONTENT=(grep -l "$FIND"); [[ $PROCESS_BINARY -eq 0 ]] && GREP_CONTENT=(grep -Il "$FIND")
+    GREP_CONTENT=(grep -Fl "$FIND"); [[ $PROCESS_BINARY -eq 0 ]] && GREP_CONTENT=(grep -IFl "$FIND")
     if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
         while IFS= read -r f; do MATCH_CONTENT_FILES+=("$f"); progress_bar ${#MATCH_CONTENT_FILES[@]} 0 "Collect"; done < <(find . -type f -exec "${GREP_CONTENT[@]}" {} \; 2>/dev/null)
     elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
