@@ -271,6 +271,26 @@ fi
 FIND="$1"
 REPLACE="$2"
 
+# Escape a string for safe use as a sed pattern (LHS of s///).
+# Escapes backslashes first, then the sed delimiter (/), then regex anchors that
+# users almost certainly mean as literals when passed via CLI.
+escape_sed_pattern() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s|/|\\/|g'
+}
+
+# Escape a string for safe use as a sed replacement (RHS of s///).
+# Escapes backslashes, the delimiter (/), and & (which sed expands to the
+# matched text).  The GNU sed 'e' flag (which executes the replacement as a
+# shell command) is neutralised because the delimiter is now always escaped and
+# cannot appear in the flags field.
+escape_sed_replace() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s|/|\\/|g; s/&/\\&/g'
+}
+
+# Pre-compute escaped versions used in sed content replacement.
+FIND_SED="$(escape_sed_pattern "$FIND")"
+REPLACE_SED="$(escape_sed_replace "$REPLACE")"
+
 # Read patterns from .renamerignore files
 ignore_file_result=$(read_ignore_files)
 IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
@@ -528,7 +548,7 @@ case "$USER_RESPONSE" in
         if [[ $SKIP_CONTENTS -eq 0 && ${#MATCH_CONTENT_FILES[@]} -gt 0 ]]; then
             total=${#MATCH_CONTENT_FILES[@]}; idx=0
             for f in "${MATCH_CONTENT_FILES[@]}"; do
-                sed -i "s/$FIND/$REPLACE/g" "$f" && ((CONTENT_REPLACED_COUNT++))
+                sed -i "s/$FIND_SED/$REPLACE_SED/g" "$f" && ((CONTENT_REPLACED_COUNT++))
                 ((idx++)); progress_bar "$idx" "$total" "Content"
             done
             finish_progress
@@ -536,9 +556,16 @@ case "$USER_RESPONSE" in
         # Directory renames (process shallowest dirs first so parent dirs are renamed before their children)
         if (( ${#DIR_CANDIDATES[@]} > 0 )); then
             total=${#DIR_CANDIDATES[@]}; idx=0
+            _rename_cwd="$(pwd -P)"
             for (( dir_idx=${#DIR_CANDIDATES[@]}-1; dir_idx>=0; dir_idx-- )); do
                 dir="${DIR_CANDIDATES[$dir_idx]}"
                 newdir="${dir//$FIND/$REPLACE}"
+                # Guard against path traversal: reject targets outside the working directory.
+                _resolved_newdir="$(realpath -m "$newdir" 2>/dev/null || echo "")"
+                if [[ -z "$_resolved_newdir" || "$_resolved_newdir" != "$_rename_cwd"/* ]]; then
+                    log_warn "Path traversal blocked: '$newdir' is outside the working directory. Skipping."
+                    ((idx++)); progress_bar "$idx" "$total" "Dirs"; continue
+                fi
                 if [[ ! -e "$newdir" ]]; then
                     if [[ -e "$dir" ]]; then
                         mv "$dir" "$newdir" && ((DIR_RENAMED_COUNT++))
@@ -557,8 +584,15 @@ case "$USER_RESPONSE" in
         # File renames
         if (( ${#FILE_CANDIDATES[@]} > 0 )); then
             total=${#FILE_CANDIDATES[@]}; idx=0
+            _rename_cwd="$(pwd -P)"
             for file in "${FILE_CANDIDATES[@]}"; do
                 newfile="${file//$FIND/$REPLACE}"
+                # Guard against path traversal: reject targets outside the working directory.
+                _resolved_newfile="$(realpath -m "$newfile" 2>/dev/null || echo "")"
+                if [[ -z "$_resolved_newfile" || "$_resolved_newfile" != "$_rename_cwd"/* ]]; then
+                    log_warn "Path traversal blocked: '$newfile' is outside the working directory. Skipping."
+                    ((idx++)); progress_bar "$idx" "$total" "Files"; continue
+                fi
                 if [[ ! -e "$newfile" ]]; then
                     if [[ -e "$file" ]]; then
                         mv "$file" "$newfile" && ((FILE_RENAMED_COUNT++))
