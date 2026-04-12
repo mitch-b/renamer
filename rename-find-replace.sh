@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 ###############################################################################
 # UI / LOGGING UTILITIES
@@ -6,7 +7,7 @@
 
 # Initialize color + symbol palette (auto–disable on non‑TTY or NO_COLOR)
 init_ui() {
-    if [[ -t 1 && -z "$NO_COLOR" ]]; then
+    if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
         # Prefer tput if available for broader term compatibility
         if command -v tput >/dev/null 2>&1; then
             local bold=$(tput bold 2>/dev/null || true)
@@ -23,7 +24,7 @@ init_ui() {
     fi
 
     # Unicode / Emoji fallback (avoid if NO_UNICODE or non‑UTF locale)
-    if [[ -n "$NO_UNICODE" || "${LC_ALL}${LC_CTYPE}${LANG}" != *"UTF"* ]]; then
+    if [[ -n "${NO_UNICODE:-}" || "${LC_ALL:-}${LC_CTYPE:-}${LANG:-}" != *"UTF"* ]]; then
         SYM_INFO="i"; SYM_WARN="!"; SYM_ERR="x"; SYM_OK="*"; SYM_RIGHT="->"; SYM_ELLIPSIS="..."; SYM_FINDREP="F/R"
     else
         SYM_INFO="ℹ"; SYM_WARN="⚠"; SYM_ERR="✖"; SYM_OK="✔"; SYM_RIGHT="→"; SYM_ELLIPSIS="…"; SYM_FINDREP="🔁"
@@ -39,7 +40,7 @@ log_success() { log_raw "${FG_GREEN}${SYM_OK}${RESET}  $*"; }
 log_dim() { log_raw "${DIM}$*${RESET}"; }
 log_section() {
     local title="$1"; shift || true
-    local line_char="─"; [[ -n "$NO_UNICODE" ]] && line_char="-"
+    local line_char="─"; [[ -n "${NO_UNICODE:-}" ]] && line_char="-"
     local cols=${COLUMNS:-80}
     local pad_line=""; while (( ${#pad_line} < cols )); do pad_line+="$line_char"; done
     log_raw "${FG_GREY}${pad_line:0:$cols}${RESET}";
@@ -50,7 +51,7 @@ print_header() {
     local cols=${COLUMNS:-80}
     local title="Renamer • Find & Replace Utility"
     local subtitle="Recursively renames files, folders & inline content"
-    local line_char="─"; [[ -n "$NO_UNICODE" ]] && line_char="-"
+    local line_char="─"; [[ -n "${NO_UNICODE:-}" ]] && line_char="-"
     local pad_line=""; while (( ${#pad_line} < cols )); do pad_line+="$line_char"; done
     log_raw "${FG_MAGENTA}${pad_line:0:$cols}${RESET}"
     log_raw "${BOLD}${FG_MAGENTA}${SYM_FINDREP}  $title${RESET}"
@@ -63,8 +64,11 @@ SCRIPT_START=$SECONDS
 init_ui
 
 
-# Function to read ignore patterns from .renamerignore files
+# Populates FILE_IGNORE_PATTERNS and IGNORE_FILES_FOUND globals directly,
+# avoiding space-delimited serialization that breaks paths/patterns with spaces.
 read_ignore_files() {
+    FILE_IGNORE_PATTERNS=()
+    IGNORE_FILES_FOUND=()
     local patterns=()
     local files_found=()
     
@@ -99,8 +103,8 @@ read_ignore_files() {
     # Automatically add .renamerignore to patterns to prevent it from being modified
     patterns+=(".renamerignore")
     
-    # Output format: "patterns|files_found"
-    printf "%s|%s" "${patterns[*]}" "${files_found[*]}"
+    FILE_IGNORE_PATTERNS=("${patterns[@]}")
+    IGNORE_FILES_FOUND=("${files_found[@]+"${files_found[@]}"}")
 }
 
 # Function to parse gitignore-style patterns and build find exclusions
@@ -271,12 +275,19 @@ fi
 FIND="$1"
 REPLACE="$2"
 
-# Read patterns from .renamerignore files
-ignore_file_result=$(read_ignore_files)
-IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
-# Prevent globbing during array assignment by using proper quoting
-IFS=' ' read -ra FILE_IGNORE_PATTERNS <<< "${ignore_file_parts[0]}"
-IFS=' ' read -ra IGNORE_FILES_FOUND <<< "${ignore_file_parts[1]}"
+if [[ -z "$FIND" ]]; then
+  log_error "<find> argument must not be empty."
+  exit 1
+fi
+
+# Pre-escape FIND and REPLACE for safe use in sed substitution expressions.
+# FIND_ESCAPED: escapes regex metacharacters and the sed delimiter (/).
+# REPLACE_ESCAPED: escapes back-references (&) and the sed delimiter (/).
+FIND_ESCAPED=$(printf '%s' "$FIND" | sed 's/[]\\/.*^$[]/\\&/g;s|/|\\/|g')
+REPLACE_ESCAPED=$(printf '%s' "$REPLACE" | sed 's/[&/]/\\&/g')
+
+# Read patterns from .renamerignore files (populates FILE_IGNORE_PATTERNS and IGNORE_FILES_FOUND)
+read_ignore_files
 
 # Combine ignore patterns: file + command line
 ALL_IGNORE_PATTERNS=("${FILE_IGNORE_PATTERNS[@]}" "${IGNORE_PATTERNS[@]}")
@@ -406,7 +417,7 @@ log_dim "Full plan with ALL matches will be shown below before confirmation."
 ##############
 # PROGRESS HELPERS
 ##############
-supports_tty() { [[ -t 1 ]] && [[ -z "$CI" ]]; }
+supports_tty() { [[ -t 1 ]] && [[ -z "${CI:-}" ]]; }
 progress_bar() {
     local current=$1 total=$2 label=$3
     local width=30
@@ -416,12 +427,13 @@ progress_bar() {
     local bar=""; local i; for ((i=0;i<filled;i++)); do bar+="#"; done; for ((i=filled;i<width;i++)); do bar+="-"; done
     if supports_tty; then printf "\r%s [%s] %3d%% (%d/%d)" "$label" "$bar" "$percent" "$current" "${total:-0}"; fi
 }
-finish_progress() { supports_tty && printf "\n"; }
+finish_progress() { if supports_tty; then printf "\n"; fi; }
 
 # Counters
 CONTENT_REPLACED_COUNT=0
 DIR_RENAMED_COUNT=0
 FILE_RENAMED_COUNT=0
+RENAMED_FILES=()
 
 #############################
 # SCAN ONLY (build plan)
@@ -429,7 +441,7 @@ FILE_RENAMED_COUNT=0
 MATCH_CONTENT_FILES=()
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     log_step "Scanning for content matches"
-    GREP_CONTENT=(grep -l "$FIND"); [[ $PROCESS_BINARY -eq 0 ]] && GREP_CONTENT=(grep -Il "$FIND")
+    GREP_CONTENT=(grep -Fl "$FIND"); [[ $PROCESS_BINARY -eq 0 ]] && GREP_CONTENT=(grep -FIl "$FIND")
     if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
         while IFS= read -r f; do MATCH_CONTENT_FILES+=("$f"); progress_bar ${#MATCH_CONTENT_FILES[@]} 0 "Collect"; done < <(find . -type f -exec "${GREP_CONTENT[@]}" {} \; 2>/dev/null)
     elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
@@ -500,7 +512,7 @@ fi
 
 echo
 READ_INPUT=1
-if [[ -n "$CI" || ! -t 0 ]]; then
+if [[ -n "${CI:-}" || ! -t 0 ]]; then
     # Non-interactive environment: if deprecated dry-run flag was passed, auto-abort; else require explicit yes via RENAMER_AUTO_YES
     if [[ $DEPRECATED_DRY_RUN -eq 1 ]]; then
         USER_RESPONSE="n"; READ_INPUT=0
@@ -528,8 +540,8 @@ case "$USER_RESPONSE" in
         if [[ $SKIP_CONTENTS -eq 0 && ${#MATCH_CONTENT_FILES[@]} -gt 0 ]]; then
             total=${#MATCH_CONTENT_FILES[@]}; idx=0
             for f in "${MATCH_CONTENT_FILES[@]}"; do
-                sed -i "s/$FIND/$REPLACE/g" "$f" && ((CONTENT_REPLACED_COUNT++))
-                ((idx++)); progress_bar "$idx" "$total" "Content"
+                sed -i "s/$FIND_ESCAPED/$REPLACE_ESCAPED/g" "$f" && ((++CONTENT_REPLACED_COUNT)) || log_error "Failed to replace content in: $f"
+                ((++idx)); progress_bar "$idx" "$total" "Content"
             done
             finish_progress
         fi
@@ -541,16 +553,16 @@ case "$USER_RESPONSE" in
                 newdir="${dir//$FIND/$REPLACE}"
                 if [[ ! -e "$newdir" ]]; then
                     if [[ -e "$dir" ]]; then
-                        mv "$dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                        mv "$dir" "$newdir" && ((++DIR_RENAMED_COUNT)) || log_error "Failed to rename directory: $dir"
                     else
                         # Parent dir was already renamed; reconstruct path using new parent + old basename
                         current_dir="$(dirname "$newdir")/$(basename "$dir")"
                         if [[ -e "$current_dir" ]]; then
-                            mv "$current_dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                            mv "$current_dir" "$newdir" && ((++DIR_RENAMED_COUNT)) || log_error "Failed to rename directory: $current_dir"
                         fi
                     fi
                 fi
-                ((idx++)); progress_bar "$idx" "$total" "Dirs"
+                ((++idx)); progress_bar "$idx" "$total" "Dirs"
             done
             finish_progress
         fi
@@ -561,18 +573,16 @@ case "$USER_RESPONSE" in
                 newfile="${file//$FIND/$REPLACE}"
                 if [[ ! -e "$newfile" ]]; then
                     if [[ -e "$file" ]]; then
-                        mv "$file" "$newfile" && ((FILE_RENAMED_COUNT++))
-                        RENAMED_FILES+=("$file -> $newfile")
+                        mv "$file" "$newfile" && { ((++FILE_RENAMED_COUNT)); RENAMED_FILES+=("$file -> $newfile"); } || log_error "Failed to rename file: $file"
                     else
                         # Directory was already renamed; reconstruct path using new dir + old basename
                         current_file="$(dirname "$newfile")/$(basename "$file")"
                         if [[ -e "$current_file" ]]; then
-                            mv "$current_file" "$newfile" && ((FILE_RENAMED_COUNT++))
-                            RENAMED_FILES+=("$file -> $newfile")
+                            mv "$current_file" "$newfile" && { ((++FILE_RENAMED_COUNT)); RENAMED_FILES+=("$file -> $newfile"); } || log_error "Failed to rename file: $current_file"
                         fi
                     fi
                 fi
-                ((idx++)); progress_bar "$idx" "$total" "Files"
+                ((++idx)); progress_bar "$idx" "$total" "Files"
             done
             finish_progress
         fi
@@ -584,12 +594,6 @@ esac
 
 echo
 log_section "Summary"
-# Column-aligned metrics table (retain original lines for tests)
-print_metrics_table() {
-    local rows=(
-        "Content matches|${SKIP_CONTENTS:-0}|${SKIP_CONTENTS:-0}"
-    )
-}
 
 ELAPSED=$(( SECONDS - SCRIPT_START ))
 if (( ELAPSED < 1 )); then ELAPSED=1; fi
@@ -604,11 +608,11 @@ if supports_tty; then
     printf "%-28s %10s\n" "Metric" "Value"
     printf "%-28s %10s\n" "----------------------------" "----------"
     if [[ ${APPLY_EXECUTED:-0} -eq 1 ]]; then
-        [[ $SKIP_CONTENTS -eq 0 ]] && printf "%-28s %10d\n" "Files with content replaced" "$CONTENT_REPLACED_COUNT"
+        if [[ $SKIP_CONTENTS -eq 0 ]]; then printf "%-28s %10d\n" "Files with content replaced" "$CONTENT_REPLACED_COUNT"; fi
         printf "%-28s %10d\n" "Directories renamed" "$DIR_RENAMED_COUNT"
         printf "%-28s %10d\n" "Files renamed" "$FILE_RENAMED_COUNT"
     else
-        [[ $SKIP_CONTENTS -eq 0 ]] && printf "%-28s %10d\n" "Content match candidates" "$total_candidate_content"
+        if [[ $SKIP_CONTENTS -eq 0 ]]; then printf "%-28s %10d\n" "Content match candidates" "$total_candidate_content"; fi
         printf "%-28s %10d\n" "Dir rename candidates" "$total_candidate_dirs"
         printf "%-28s %10d\n" "File rename candidates" "$total_candidate_files"
     fi
