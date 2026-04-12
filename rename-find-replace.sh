@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 ###############################################################################
 # UI / LOGGING UTILITIES
@@ -6,7 +7,7 @@
 
 # Initialize color + symbol palette (auto–disable on non‑TTY or NO_COLOR)
 init_ui() {
-    if [[ -t 1 && -z "$NO_COLOR" ]]; then
+    if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
         # Prefer tput if available for broader term compatibility
         if command -v tput >/dev/null 2>&1; then
             local bold=$(tput bold 2>/dev/null || true)
@@ -23,7 +24,7 @@ init_ui() {
     fi
 
     # Unicode / Emoji fallback (avoid if NO_UNICODE or non‑UTF locale)
-    if [[ -n "$NO_UNICODE" || "${LC_ALL}${LC_CTYPE}${LANG}" != *"UTF"* ]]; then
+    if [[ -n "${NO_UNICODE:-}" || "${LC_ALL:-}${LC_CTYPE:-}${LANG:-}" != *"UTF"* ]]; then
         SYM_INFO="i"; SYM_WARN="!"; SYM_ERR="x"; SYM_OK="*"; SYM_RIGHT="->"; SYM_ELLIPSIS="..."; SYM_FINDREP="F/R"
     else
         SYM_INFO="ℹ"; SYM_WARN="⚠"; SYM_ERR="✖"; SYM_OK="✔"; SYM_RIGHT="→"; SYM_ELLIPSIS="…"; SYM_FINDREP="🔁"
@@ -39,7 +40,7 @@ log_success() { log_raw "${FG_GREEN}${SYM_OK}${RESET}  $*"; }
 log_dim() { log_raw "${DIM}$*${RESET}"; }
 log_section() {
     local title="$1"; shift || true
-    local line_char="─"; [[ -n "$NO_UNICODE" ]] && line_char="-"
+    local line_char="─"; [[ -n "${NO_UNICODE:-}" ]] && line_char="-"
     local cols=${COLUMNS:-80}
     local pad_line=""; while (( ${#pad_line} < cols )); do pad_line+="$line_char"; done
     log_raw "${FG_GREY}${pad_line:0:$cols}${RESET}";
@@ -50,7 +51,7 @@ print_header() {
     local cols=${COLUMNS:-80}
     local title="Renamer • Find & Replace Utility"
     local subtitle="Recursively renames files, folders & inline content"
-    local line_char="─"; [[ -n "$NO_UNICODE" ]] && line_char="-"
+    local line_char="─"; [[ -n "${NO_UNICODE:-}" ]] && line_char="-"
     local pad_line=""; while (( ${#pad_line} < cols )); do pad_line+="$line_char"; done
     log_raw "${FG_MAGENTA}${pad_line:0:$cols}${RESET}"
     log_raw "${BOLD}${FG_MAGENTA}${SYM_FINDREP}  $title${RESET}"
@@ -99,8 +100,10 @@ read_ignore_files() {
     # Automatically add .renamerignore to patterns to prevent it from being modified
     patterns+=(".renamerignore")
     
-    # Output format: "patterns|files_found"
-    printf "%s|%s" "${patterns[*]}" "${files_found[*]}"
+    # Output format: each pattern on its own line, FS sentinel, each file on its own line
+    printf '%s\n' "${patterns[@]+"${patterns[@]}"}"
+    printf '%s\n' $'\034'
+    printf '%s\n' "${files_found[@]+"${files_found[@]}"}"
 }
 
 # Function to parse gitignore-style patterns and build find exclusions
@@ -194,7 +197,7 @@ build_find_exclusions() {
     
     # If we have negation patterns, output a separator and then include conditions
     if [[ ${#include_conditions[@]} -gt 0 ]]; then
-        printf "NEGATION_SEPARATOR\n"
+        printf '%s\n' $'\035'
         printf "%s\n" "${include_conditions[@]}"
     fi
 }
@@ -226,7 +229,7 @@ while [[ $# -gt 0 ]]; do
                 done
                 shift 2
             else
-                echo "Error: --ignore requires a pattern argument"; exit 1
+                log_error "--ignore requires a pattern argument"; exit 1
             fi ;;
         --include)
             if [[ -n "$2" && "$2" != --* ]]; then
@@ -237,7 +240,7 @@ while [[ $# -gt 0 ]]; do
                 done
                 shift 2
             else
-                echo "Error: --include requires a pattern argument"; exit 1
+                log_error "--include requires a pattern argument"; exit 1
             fi ;;
         --dry-run|--dryrun|-n)
             # Deprecated: keep tolerant for old usage; treat as "show plan then ask"
@@ -245,7 +248,7 @@ while [[ $# -gt 0 ]]; do
         *) POSITIONAL+=("$1"); shift ;;
     esac
 done
-set -- "${POSITIONAL[@]}"
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 if [[ $# -lt 2 ]]; then
     echo "🐳 Renamer - Docker-based find & replace tool"
@@ -270,13 +273,27 @@ if [[ $# -lt 2 ]]; then
 fi
 FIND="$1"
 REPLACE="$2"
+if [[ -z "$FIND" ]]; then
+    log_error "The <find> argument must not be empty."
+    exit 1
+fi
+FIND_GLOB=$(printf '%s' "$FIND" | sed 's/[][?*]/\\&/g')
 
 # Read patterns from .renamerignore files
-ignore_file_result=$(read_ignore_files)
-IFS='|' read -ra ignore_file_parts <<< "$ignore_file_result"
-# Prevent globbing during array assignment by using proper quoting
-IFS=' ' read -ra FILE_IGNORE_PATTERNS <<< "${ignore_file_parts[0]}"
-IFS=' ' read -ra IGNORE_FILES_FOUND <<< "${ignore_file_parts[1]}"
+FILE_IGNORE_PATTERNS=()
+IGNORE_FILES_FOUND=()
+_rfif_group="patterns"
+while IFS= read -r _rfif_line; do
+    if [[ "$_rfif_line" == $'\034' ]]; then
+        _rfif_group="files"
+        continue
+    fi
+    if [[ "$_rfif_group" == "patterns" ]]; then
+        [[ -n "$_rfif_line" ]] && FILE_IGNORE_PATTERNS+=("$_rfif_line")
+    else
+        [[ -n "$_rfif_line" ]] && IGNORE_FILES_FOUND+=("$_rfif_line")
+    fi
+done < <(read_ignore_files)
 
 # Combine ignore patterns: file + command line
 ALL_IGNORE_PATTERNS=("${FILE_IGNORE_PATTERNS[@]}" "${IGNORE_PATTERNS[@]}")
@@ -307,7 +324,7 @@ while IFS= read -r line; do
     # Skip empty lines
     [[ -n "$line" ]] || continue
     
-    if [[ "$line" == "NEGATION_SEPARATOR" ]]; then
+    if [[ "$line" == $'\035' ]]; then
         reading_negations=true
     elif [[ "$reading_negations" == true ]]; then
         NEGATION_CONDITIONS+=("$line")
@@ -371,28 +388,28 @@ get_limited_matches() {
         # No exclusions at all
         if [[ "$type" == "content" ]]; then
             find . -type f -exec "${GREP_CMD[@]}" {} \; 2>/dev/null | while read -r line; do
-                echo "$line"; ((counter++)); [[ $counter -ge $limit ]] && break
+                echo "$line"; (( ++counter )); [[ $counter -ge $limit ]] && break
             done
         else
-            find . -type "$type" -name "*$pattern*" | head -n "$limit"
+            find . -type "$type" -name "*$FIND_GLOB*" | head -n "$limit"
         fi
     elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
         # Use exclusions with negation includes
         if [[ "$type" == "content" ]]; then
             find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -exec "${GREP_CMD[@]}" {} \; 2>/dev/null | while read -r line; do
-                echo "$line"; ((counter++)); [[ $counter -ge $limit ]] && break
+                echo "$line"; (( ++counter )); [[ $counter -ge $limit ]] && break
             done
         else
-            find . -type "$type" \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$pattern*" | head -n "$limit"
+            find . -type "$type" \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND_GLOB*" | head -n "$limit"
         fi
     else
         # Only exclusions (no negations)
         if [[ "$type" == "content" ]]; then
             find . -type f "${FIND_EXCLUSIONS[@]}" -exec "${GREP_CMD[@]}" {} \; 2>/dev/null | while read -r line; do
-                echo "$line"; ((counter++)); [[ $counter -ge $limit ]] && break
+                echo "$line"; (( ++counter )); [[ $counter -ge $limit ]] && break
             done
         else
-            find . -type "$type" "${FIND_EXCLUSIONS[@]}" -name "*$pattern*" | head -n "$limit"
+            find . -type "$type" "${FIND_EXCLUSIONS[@]}" -name "*$FIND_GLOB*" | head -n "$limit"
         fi
     fi
 }
@@ -406,7 +423,7 @@ log_dim "Full plan with ALL matches will be shown below before confirmation."
 ##############
 # PROGRESS HELPERS
 ##############
-supports_tty() { [[ -t 1 ]] && [[ -z "$CI" ]]; }
+supports_tty() { [[ -t 1 ]] && [[ -z "${CI:-}" ]]; }
 progress_bar() {
     local current=$1 total=$2 label=$3
     local width=30
@@ -416,12 +433,13 @@ progress_bar() {
     local bar=""; local i; for ((i=0;i<filled;i++)); do bar+="#"; done; for ((i=filled;i<width;i++)); do bar+="-"; done
     if supports_tty; then printf "\r%s [%s] %3d%% (%d/%d)" "$label" "$bar" "$percent" "$current" "${total:-0}"; fi
 }
-finish_progress() { supports_tty && printf "\n"; }
+finish_progress() { if supports_tty; then printf "\n"; fi; }
 
 # Counters
 CONTENT_REPLACED_COUNT=0
 DIR_RENAMED_COUNT=0
 FILE_RENAMED_COUNT=0
+RENAMED_FILES=()
 
 #############################
 # SCAN ONLY (build plan)
@@ -429,7 +447,8 @@ FILE_RENAMED_COUNT=0
 MATCH_CONTENT_FILES=()
 if [[ $SKIP_CONTENTS -eq 0 ]]; then
     log_step "Scanning for content matches"
-    GREP_CONTENT=(grep -l "$FIND"); [[ $PROCESS_BINARY -eq 0 ]] && GREP_CONTENT=(grep -Il "$FIND")
+    GREP_CONTENT=(grep -l "$FIND")
+    if [[ $PROCESS_BINARY -eq 0 ]]; then GREP_CONTENT=(grep -Il "$FIND"); fi
     if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
         while IFS= read -r f; do MATCH_CONTENT_FILES+=("$f"); progress_bar ${#MATCH_CONTENT_FILES[@]} 0 "Collect"; done < <(find . -type f -exec "${GREP_CONTENT[@]}" {} \; 2>/dev/null)
     elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
@@ -446,11 +465,11 @@ fi
 DIR_CANDIDATES=()
 log_step "Scanning directories for rename candidates"
 if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
-    while IFS= read -r dir; do newdir="${dir//$FIND/$REPLACE}"; [[ "$dir" == "$newdir" ]] && continue; DIR_CANDIDATES+=("$dir"); progress_bar ${#DIR_CANDIDATES[@]} 0 "Dirs"; done < <(find . -depth -type d -name "*$FIND*")
+    while IFS= read -r dir; do newdir="${dir//$FIND/$REPLACE}"; [[ "$dir" == "$newdir" ]] && continue; DIR_CANDIDATES+=("$dir"); progress_bar ${#DIR_CANDIDATES[@]} 0 "Dirs"; done < <(find . -depth -type d -name "*$FIND_GLOB*")
 elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
-    while IFS= read -r dir; do newdir="${dir//$FIND/$REPLACE}"; [[ "$dir" == "$newdir" ]] && continue; DIR_CANDIDATES+=("$dir"); progress_bar ${#DIR_CANDIDATES[@]} 0 "Dirs"; done < <(find . -depth -type d \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*")
+    while IFS= read -r dir; do newdir="${dir//$FIND/$REPLACE}"; [[ "$dir" == "$newdir" ]] && continue; DIR_CANDIDATES+=("$dir"); progress_bar ${#DIR_CANDIDATES[@]} 0 "Dirs"; done < <(find . -depth -type d \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND_GLOB*")
 else
-    while IFS= read -r dir; do newdir="${dir//$FIND/$REPLACE}"; [[ "$dir" == "$newdir" ]] && continue; DIR_CANDIDATES+=("$dir"); progress_bar ${#DIR_CANDIDATES[@]} 0 "Dirs"; done < <(find . -depth -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND*")
+    while IFS= read -r dir; do newdir="${dir//$FIND/$REPLACE}"; [[ "$dir" == "$newdir" ]] && continue; DIR_CANDIDATES+=("$dir"); progress_bar ${#DIR_CANDIDATES[@]} 0 "Dirs"; done < <(find . -depth -type d "${FIND_EXCLUSIONS[@]}" -name "*$FIND_GLOB*")
 fi
 finish_progress
 # (Renames deferred until confirmation)
@@ -459,11 +478,11 @@ finish_progress
 FILE_CANDIDATES=()
 log_step "Scanning files for rename candidates"
 if [[ ${#FIND_EXCLUSIONS[@]} -eq 0 && ${#NEGATION_CONDITIONS[@]} -eq 0 ]]; then
-    while IFS= read -r file; do newfile="${file//$FIND/$REPLACE}"; [[ "$file" == "$newfile" ]] && continue; FILE_CANDIDATES+=("$file"); progress_bar ${#FILE_CANDIDATES[@]} 0 "Files"; done < <(find . -type f -name "*$FIND*")
+    while IFS= read -r file; do newfile="${file//$FIND/$REPLACE}"; [[ "$file" == "$newfile" ]] && continue; FILE_CANDIDATES+=("$file"); progress_bar ${#FILE_CANDIDATES[@]} 0 "Files"; done < <(find . -type f -name "*$FIND_GLOB*")
 elif [[ ${#NEGATION_CONDITIONS[@]} -gt 0 ]]; then
-    while IFS= read -r file; do newfile="${file//$FIND/$REPLACE}"; [[ "$file" == "$newfile" ]] && continue; FILE_CANDIDATES+=("$file"); progress_bar ${#FILE_CANDIDATES[@]} 0 "Files"; done < <(find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND*")
+    while IFS= read -r file; do newfile="${file//$FIND/$REPLACE}"; [[ "$file" == "$newfile" ]] && continue; FILE_CANDIDATES+=("$file"); progress_bar ${#FILE_CANDIDATES[@]} 0 "Files"; done < <(find . -type f \( "${FIND_EXCLUSIONS[@]}" -o "${NEGATION_CONDITIONS[@]}" \) -name "*$FIND_GLOB*")
 else
-    while IFS= read -r file; do newfile="${file//$FIND/$REPLACE}"; [[ "$file" == "$newfile" ]] && continue; FILE_CANDIDATES+=("$file"); progress_bar ${#FILE_CANDIDATES[@]} 0 "Files"; done < <(find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND*")
+    while IFS= read -r file; do newfile="${file//$FIND/$REPLACE}"; [[ "$file" == "$newfile" ]] && continue; FILE_CANDIDATES+=("$file"); progress_bar ${#FILE_CANDIDATES[@]} 0 "Files"; done < <(find . -type f "${FIND_EXCLUSIONS[@]}" -name "*$FIND_GLOB*")
 fi
 finish_progress
 # (Renames deferred until confirmation)
@@ -500,7 +519,7 @@ fi
 
 echo
 READ_INPUT=1
-if [[ -n "$CI" || ! -t 0 ]]; then
+if [[ -n "${CI:-}" || ! -t 0 ]]; then
     # Non-interactive environment: if deprecated dry-run flag was passed, auto-abort; else require explicit yes via RENAMER_AUTO_YES
     if [[ $DEPRECATED_DRY_RUN -eq 1 ]]; then
         USER_RESPONSE="n"; READ_INPUT=0
@@ -528,8 +547,10 @@ case "$USER_RESPONSE" in
         if [[ $SKIP_CONTENTS -eq 0 && ${#MATCH_CONTENT_FILES[@]} -gt 0 ]]; then
             total=${#MATCH_CONTENT_FILES[@]}; idx=0
             for f in "${MATCH_CONTENT_FILES[@]}"; do
-                sed -i "s/$FIND/$REPLACE/g" "$f" && ((CONTENT_REPLACED_COUNT++))
-                ((idx++)); progress_bar "$idx" "$total" "Content"
+                ESC_FIND=$(printf '%s' "$FIND" | sed 's/[]\.[*^$()/\\]/\\&/g')
+                ESC_REPLACE=$(printf '%s' "$REPLACE" | sed 's/[&/\\]/\\&/g')
+                sed -i "s/$ESC_FIND/$ESC_REPLACE/g" "$f" && CONTENT_REPLACED_COUNT=$(( CONTENT_REPLACED_COUNT + 1 )) || log_error "Failed to update content in '$f'"
+                idx=$(( idx + 1 )); progress_bar "$idx" "$total" "Content"
             done
             finish_progress
         fi
@@ -541,16 +562,16 @@ case "$USER_RESPONSE" in
                 newdir="${dir//$FIND/$REPLACE}"
                 if [[ ! -e "$newdir" ]]; then
                     if [[ -e "$dir" ]]; then
-                        mv "$dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                        mv "$dir" "$newdir" && DIR_RENAMED_COUNT=$(( DIR_RENAMED_COUNT + 1 )) || log_error "Failed to rename '$dir' -> '$newdir'"
                     else
                         # Parent dir was already renamed; reconstruct path using new parent + old basename
                         current_dir="$(dirname "$newdir")/$(basename "$dir")"
                         if [[ -e "$current_dir" ]]; then
-                            mv "$current_dir" "$newdir" && ((DIR_RENAMED_COUNT++))
+                            mv "$current_dir" "$newdir" && DIR_RENAMED_COUNT=$(( DIR_RENAMED_COUNT + 1 )) || log_error "Failed to rename '$current_dir' -> '$newdir'"
                         fi
                     fi
                 fi
-                ((idx++)); progress_bar "$idx" "$total" "Dirs"
+                idx=$(( idx + 1 )); progress_bar "$idx" "$total" "Dirs"
             done
             finish_progress
         fi
@@ -561,18 +582,18 @@ case "$USER_RESPONSE" in
                 newfile="${file//$FIND/$REPLACE}"
                 if [[ ! -e "$newfile" ]]; then
                     if [[ -e "$file" ]]; then
-                        mv "$file" "$newfile" && ((FILE_RENAMED_COUNT++))
+                        mv "$file" "$newfile" && FILE_RENAMED_COUNT=$(( FILE_RENAMED_COUNT + 1 )) || log_error "Failed to rename '$file' -> '$newfile'"
                         RENAMED_FILES+=("$file -> $newfile")
                     else
                         # Directory was already renamed; reconstruct path using new dir + old basename
                         current_file="$(dirname "$newfile")/$(basename "$file")"
                         if [[ -e "$current_file" ]]; then
-                            mv "$current_file" "$newfile" && ((FILE_RENAMED_COUNT++))
+                            mv "$current_file" "$newfile" && FILE_RENAMED_COUNT=$(( FILE_RENAMED_COUNT + 1 )) || log_error "Failed to rename '$current_file' -> '$newfile'"
                             RENAMED_FILES+=("$file -> $newfile")
                         fi
                     fi
                 fi
-                ((idx++)); progress_bar "$idx" "$total" "Files"
+                idx=$(( idx + 1 )); progress_bar "$idx" "$total" "Files"
             done
             finish_progress
         fi
@@ -584,12 +605,6 @@ esac
 
 echo
 log_section "Summary"
-# Column-aligned metrics table (retain original lines for tests)
-print_metrics_table() {
-    local rows=(
-        "Content matches|${SKIP_CONTENTS:-0}|${SKIP_CONTENTS:-0}"
-    )
-}
 
 ELAPSED=$(( SECONDS - SCRIPT_START ))
 if (( ELAPSED < 1 )); then ELAPSED=1; fi
