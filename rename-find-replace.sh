@@ -584,13 +584,6 @@ esac
 
 echo
 log_section "Summary"
-# Column-aligned metrics table (retain original lines for tests)
-print_metrics_table() {
-    local rows=(
-        "Content matches|${SKIP_CONTENTS:-0}|${SKIP_CONTENTS:-0}"
-    )
-}
-
 ELAPSED=$(( SECONDS - SCRIPT_START ))
 if (( ELAPSED < 1 )); then ELAPSED=1; fi
 
